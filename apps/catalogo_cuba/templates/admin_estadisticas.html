@@ -1,0 +1,99 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link">📦 Productos</a>
+            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link">🏷️ Categorias</a>
+            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link">📋 Inventario</a>
+            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link">💳 Suscripcion</a>
+            <a href="{{=URL('catalogo_cuba/admin/estadisticas')}}" class="sidebar-link active">📈 Estadisticas</a>
+        </nav>
+    </aside>
+    
+    <div class="admin-main">
+        <h1 style="font-size:1.3rem;margin-bottom:1rem">📈 Estadisticas</h1>
+        
+        <!-- Stats cards -->
+        <div class="stats-grid mb-3">
+            <div class="stat-card">
+                <div class="stat-value">{{=total_visitas}}</div>
+                <div class="stat-label">Total visitas</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{=total_productos}}</div>
+                <div class="stat-label">Productos</div>
+            </div>
+        </div>
+        
+        <!-- Top productos -->
+        <div class="card mb-3">
+            <h2 style="font-size:1.1rem;margin-bottom:1rem">🔥 Productos mas vistos</h2>
+            {{if top_productos:}}
+            <div style="overflow-x:auto">
+                <table class="table">
+                    <thead>
+                        <tr><th>Producto</th><th>Vistas</th><th>Precio</th><th>Stock</th></tr>
+                    </thead>
+                    <tbody>
+                        {{for p in top_productos:}}
+                        <tr>
+                            <td>
+                                <div class="flex" style="gap:.5rem">
+                                    {{if p.imagen_principal:}}
+                                    <img src="/catalogo_cuba/uploads/{{=p.imagen_principal}}" style="width:35px;height:35px;object-fit:cover;border-radius:4px" loading="lazy">
+                                    {{else:}}
+                                    <div style="width:35px;height:35px;background:var(--color-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1rem">📦</div>
+                                    {{pass}}
+                                    <a href="{{=URL('catalogo_cuba/admin/producto/editar', p.id)}}">{{=p.nombre}}</a>
+                                </div>
+                            </td>
+                            <td>{{=p.vistas or 0}}</td>
+                            <td>{{='%.2f' % (p.precio or 0)}} {{=p.moneda or 'CUP'}}</td>
+                            <td>{{=p.stock or 0}}</td>
+                        </tr>
+                        {{pass}}
+                    </tbody>
+                </table>
+            </div>
+            {{else:}}
+            <p class="text-sm">Aun no hay datos suficientes</p>
+            {{pass}}
+        </div>
+        
+        <!-- Visitas recientes -->
+        <div class="card">
+            <h2 style="font-size:1.1rem;margin-bottom:1rem">📅 Visitas recientes (ultimos 30 dias)</h2>
+            {{if visitas:}}
+            <div style="overflow-x:auto">
+                <table class="table">
+                    <thead>
+                        <tr><th>Fecha</th><th>IP</th><th>Producto</th></tr>
+                    </thead>
+                    <tbody>
+                        {{for v in visitas[-50:]:}}
+                        <tr>
+                            <td>{{=v.fecha.strftime('%d/%m/%Y %H:%M') if v.fecha else '-'}}</td>
+                            <td class="text-sm">{{=v.ip or '-'}}</td>
+                            <td class="text-sm">
+                                {{if v.producto_id:}}
+                                {{producto = db.producto[v.producto_id]}}
+                                {{=producto.nombre if producto else 'Desconocido'}}
+                                {{else:}}
+                                <span class="text-sm">Pagina principal</span>
+                                {{pass}}
+                            </td>
+                        </tr>
+                        {{pass}}
+                    </tbody>
+                </table>
+            </div>
+            {{else:}}
+            <p class="text-sm">No hay visitas registradas en el ultimo mes</p>
+            {{pass}}
+        </div>
+    </div>
+</div>
+{{end}}
