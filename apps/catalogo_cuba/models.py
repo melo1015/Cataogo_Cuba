@@ -1,18 +1,34 @@
 """
 Modelos de datos - CatalogoCuba
-Define todas las tablas de la base de datos usando pyDAL
+Define todas las tablas de la base de datos usando pyDAL (py4web).
 """
-from py4web import Field
-from py4web.utils.auth import Auth
-from pydal.validators import *
-from .common import db, auth
+from datetime import datetime
+
+from pydal import Field
+from pydal.validators import (
+    IS_NOT_EMPTY, IS_SLUG, IS_EMPTY_OR, IS_IMAGE,
+    IS_IN_SET, IS_DECIMAL_IN_RANGE,
+)
+
+from .common import db, auth, roles_tags, asignar_rol
 from . import settings
 
 # ============================================================
 # TABLAS DE AUTENTICACION (auth)
 # ============================================================
+# En py4web, Auth ya crea automaticamente sus tablas al instanciarse
+# en common.py. NO se debe llamar a auth.define_tables() (no existe en py4web).
 
-auth.define_tables()
+# Campos personalizados en auth_user que el resto del sistema espera
+if "fecha_registro" not in db.auth_user.fields:
+    db.auth_user.define_field("fecha_registro", "datetime", default=None)
+
+if "telefono" not in db.auth_user.fields:
+    db.auth_user.define_field("telefono", "string", length=20, default="")
+
+db.auth_user.fecha_registro.writable = False
+db.auth_user.fecha_registro.readable = True
+
 
 # ============================================================
 # TABLA DE NEGOCIOS
@@ -266,6 +282,20 @@ db.define_table(
     Field("fecha_lectura", "datetime", default=None, label="Fecha de lectura"),
     format="%(titulo)s",
 )
+
+# ============================================================
+# HOOKS DE AUTH
+# ============================================================
+
+@auth.on_signup
+def _on_signup(user):
+    """Asigna rol 'visitante' y fecha_registro al nuevo usuario."""
+    try:
+        user.update_record(fecha_registro=datetime.utcnow())
+        asignar_rol(user["id"], "visitante")
+    except Exception as e:
+        print("Error en on_signup: %s" % e)
+
 
 # ============================================================
 # COMMIT DE MODELOS
