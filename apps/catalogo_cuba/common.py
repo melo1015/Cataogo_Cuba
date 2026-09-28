@@ -1,17 +1,21 @@
 """
 Modulo comun - Utilidades compartidas de la aplicacion
-Incluye: db, session, auth, translator, y utilidades
+Incluye: db, session, auth, y utilidades de autorizacion mediante Tags.
 """
 import os
 import uuid
-import hashlib
-from datetime import datetime, timedelta
-from PIL import Image, ImageOps
 import io
+import re
+import unicodedata
+from datetime import datetime, timedelta
 
-from py4web import Session, Translator, DAL, Field, action
+from PIL import Image, ImageOps
+
+from py4web import Session, response
 from py4web.utils.auth import Auth
-from py4web.utils.form import FormStyleDefault
+from py4web.utils.form import FormStyleBulma
+from pydal import DAL, Field
+from pydal.tools.tags import Tags
 
 from . import settings
 
@@ -25,7 +29,6 @@ db = DAL(
     pool_size=settings.DB_POOL_SIZE,
     migrate=settings.DB_MIGRATE,
     fake_migrate=settings.DB_FAKE_MIGRATE,
-    migrate_enabled=True,
 )
 
 # ============================================================
@@ -35,38 +38,90 @@ db = DAL(
 session = Session(secret=settings.SESSION_SECRET_KEY)
 
 # ============================================================
-# TRADUCTOR
-# ============================================================
-
-translator = Translator(os.path.join(os.path.dirname(__file__), "translations"))
-
-# ============================================================
 # AUTENTICACION
 # ============================================================
 
-auth = Auth(session, db, define_tables=False)
+auth = Auth(session, db)
+
 auth.param.registration_requires_confirmation = settings.AUTH_REGISTRATION_REQUIRES_CONFIRMATION
 auth.param.registration_requires_approval = settings.AUTH_REGISTRATION_REQUIRES_APPROVAL
-auth.param.allowed_actions = [
-    "login",
-    "logout",
-    "register",
-    "request_reset_password",
-    "reset_password",
-    "change_password",
-    "change_email",
-    "profile",
-]
 
 # ============================================================
-# ROLES DE USUARIO
+# AUTORIZACION MEDIANTE TAGS (mecanismo oficial de py4web)
 # ============================================================
 
+# Tags asociados a la tabla auth_user.
+# Crea automaticamente la tabla auth_user_tag_roles con campos: id, path, record_id.
+# Ver documentacion: https://py4web.com/_documentation/static/en/chapter-13.html#authorization-using-tags
+roles_tags = Tags(db.auth_user, 'roles')
+
+# Roles disponibles en la aplicacion
 ROLES = {
     "superadmin": "Administrador del sitio",
     "comerciante": "Dueno de negocio",
     "visitante": "Usuario visitante",
 }
+
+
+def asignar_rol(user_id, rol):
+    """
+    Asigna el rol indicado a un usuario usando el sistema de Tags de py4web.
+    Un usuario puede tener multiples roles (tags).
+    """
+    if not user_id or rol not in ROLES:
+        return False
+    roles_tags.add(user_id, rol)
+    return True
+
+
+def quitar_rol(user_id, rol):
+    """Quita el rol indicado a un usuario."""
+    if not user_id or rol not in ROLES:
+        return False
+    roles_tags.remove(user_id, rol)
+    return True
+
+
+def obtener_roles(user_id):
+    """Retorna la lista de roles (tags) de un usuario."""
+    if not user_id:
+        return []
+    return roles_tags.get(user_id)
+
+
+def usuario_tiene_rol(user_id, rol):
+    """Verifica si un usuario tiene el rol indicado."""
+    if not user_id:
+        return False
+    return rol in roles_tags.get(user_id)
+
+
+def es_superadmin():
+    """Verifica si el usuario actual es superadmin."""
+    user = auth.get_user()
+    if not user:
+        return False
+    return usuario_tiene_rol(user["id"], "superadmin")
+
+
+def es_comerciante():
+    """Verifica si el usuario actual es comerciante o superadmin."""
+    user = auth.get_user()
+    if not user:
+        return False
+    return (
+        usuario_tiene_rol(user["id"], "comerciante") or
+        usuario_tiene_rol(user["id"], "superadmin")
+    )
+
+
+def es_visitante():
+    """Verifica si el usuario actual es visitante."""
+    user = auth.get_user()
+    if not user:
+        return False
+    return usuario_tiene_rol(user["id"], "visitante")
+
 
 # ============================================================
 # UTILIDADES DE IMAGEN
@@ -75,138 +130,90 @@ ROLES = {
 def optimizar_imagen(archivo, max_size=settings.IMAGE_MEDIUM_SIZE, quality=settings.IMAGE_QUALITY):
     """
     Comprime y optimiza una imagen para conexiones lentas.
-    Retorna el archivo optimizado como bytes.
+    Retorna un BytesIO con la imagen optimizada, o None en caso de error.
     """
     try:
         img = Image.open(archivo)
-        
-        # Convertir a RGB si es necesario (para PNG con transparencia)
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
-        
-        # Redimensionar manteniendo proporcion
-        img.thumbnail(max_size, Image.LANCZOS)
-        
-        # Auto-orientar segun EXIF
         img = ImageOps.exif_transpose(img)
-        
-        # Guardar con compresion optimizada
+        img.thumbnail(max_size, Image.LANCZOS)
+
         output = io.BytesIO()
         img.save(output, format="JPEG", quality=quality, optimize=True)
         output.seek(0)
-        
         return output
     except Exception as e:
-        print(f"Error optimizando imagen: {e}")
+        print("Error optimizando imagen: %s" % e)
         return None
+
 
 def guardar_imagen(archivo, nombre_carpeta="productos"):
     """
     Guarda una imagen optimizada en el directorio de uploads.
-    Retorna la ruta relativa del archivo guardado.
+    Retorna la ruta relativa del archivo guardado, o None.
     """
     if not archivo:
         return None
-    
-    # Crear carpeta si no existe
+
     carpeta = os.path.join(settings.UPLOAD_FOLDER, nombre_carpeta)
     os.makedirs(carpeta, exist_ok=True)
-    
-    # Generar nombre unico
-    extension = ".jpg"
-    nombre_unico = f"{uuid.uuid4().hex}{extension}"
-    ruta_relativa = f"{nombre_carpeta}/{nombre_unico}"
+
+    nombre_unico = "%s.jpg" % uuid.uuid4().hex
+    ruta_relativa = "%s/%s" % (nombre_carpeta, nombre_unico)
     ruta_absoluta = os.path.join(settings.UPLOAD_FOLDER, ruta_relativa)
-    
-    # Optimizar y guardar
+
     optimizada = optimizar_imagen(archivo)
     if optimizada:
         with open(ruta_absoluta, "wb") as f:
             f.write(optimizada.read())
         return ruta_relativa
-    
+
     return None
 
+
 def generar_thumbnail(archivo):
-    """Genera una version thumbnail de la imagen."""
     return optimizar_imagen(archivo, max_size=settings.IMAGE_THUMBNAIL_SIZE)
+
 
 # ============================================================
 # UTILIDADES DE FECHA
 # ============================================================
 
 def ahora_cuba():
-    """Retorna la fecha/hora actual en zona horaria de Cuba (UTC-5)."""
+    """Retorna la fecha/hora actual aproximada en zona horaria de Cuba (UTC-5)."""
     return datetime.utcnow() - timedelta(hours=5)
 
+
 def formatear_fecha(fecha):
-    """Formatea una fecha para mostrar."""
     if not fecha:
         return ""
     return fecha.strftime("%d/%m/%Y %H:%M")
 
+
 def formatear_fecha_corta(fecha):
-    """Formatea una fecha corta."""
     if not fecha:
         return ""
     return fecha.strftime("%d/%m/%Y")
+
 
 # ============================================================
 # UTILIDADES DE RESPUESTA JSON
 # ============================================================
 
 def respuesta_json(exito=True, mensaje="", datos=None, codigo=200):
-    """Genera una respuesta JSON estandarizada."""
-    from py4web import response
-    import json
+    """
+    Genera una respuesta JSON estandarizada.
+    Devuelve un dict; py4web lo serializa automaticamente.
+    """
     response.status = codigo
     response.headers["Content-Type"] = "application/json"
-    resultado = {
+    return {
         "exito": exito,
         "mensaje": mensaje,
         "datos": datos or {},
     }
-    return json.dumps(resultado)
 
-# ============================================================
-# DECORADOR DE PERMISOS
-# ============================================================
-
-def requiere_rol(rol_requerido):
-    """
-    Decorador que verifica si el usuario tiene el rol requerido.
-    Uso: @requiere_rol("superadmin") o @requiere_rol("comerciante")
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            user = auth.get_user()
-            if not user:
-                from py4web import redirect, URL
-                return redirect(URL("auth/login"))
-            
-            # Verificar rol
-            rol_usuario = user.get("rol", "visitante")
-            if rol_requerido == "superadmin" and rol_usuario != "superadmin":
-                return respuesta_json(exito=False, mensaje="Acceso denegado: requiere rol de superadmin", codigo=403)
-            
-            if rol_requerido == "comerciante" and rol_usuario not in ["superadmin", "comerciante"]:
-                return respuesta_json(exito=False, mensaje="Acceso denegado: requiere rol de comerciante", codigo=403)
-            
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-def es_superadmin():
-    """Verifica si el usuario actual es superadmin."""
-    user = auth.get_user()
-    return user and user.get("rol") == "superadmin"
-
-def es_comerciante():
-    """Verifica si el usuario actual es comerciante o superadmin."""
-    user = auth.get_user()
-    if not user:
-        return False
-    return user.get("rol") in ["comerciante", "superadmin"]
 
 # ============================================================
 # SLUGIFY
@@ -214,20 +221,19 @@ def es_comerciante():
 
 def slugify(texto):
     """Convierte un texto a slug URL-friendly."""
-    import unicodedata
-    import re
+    if not texto:
+        return ""
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
     texto = re.sub(r"[^\w\s-]", "", texto).strip().lower()
     return re.sub(r"[-\s]+", "-", texto)
+
 
 # ============================================================
 # ESTADISTICAS
 # ============================================================
 
 def registrar_visita(negocio_id=None, producto_id=None, ip=None, user_agent=None):
-    """
-    Registra una visita de forma ligera (sin bloquear la respuesta).
-    """
+    """Registra una visita de forma ligera."""
     try:
         db.visita.insert(
             negocio_id=negocio_id,
@@ -238,10 +244,12 @@ def registrar_visita(negocio_id=None, producto_id=None, ip=None, user_agent=None
         )
         db.commit()
     except Exception as e:
-        print(f"Error registrando visita: {e}")
+        print("Error registrando visita: %s" % e)
+
 
 # ============================================================
-# FORM STYLE CUSTOM (optimizado para conexiones lentas)
+# FORM STYLE CUSTOM
 # ============================================================
 
-FormStyleCatalogo = FormStyleDefault
+# En py4web no existe FormStyleDefault. Se usa FormStyleBulma.
+FormStyleCatalogo = FormStyleBulma
