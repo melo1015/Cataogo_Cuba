@@ -1,0 +1,52 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<section class="hero" style="background:linear-gradient(135deg,var(--color-primary),#1d4ed8);color:#fff;padding:3rem 0;text-align:center">
+    <div class="container">
+        <h1 style="font-size:2rem;margin-bottom:.5rem">📦 CatalogoCuba</h1>
+        <p style="opacity:.9;font-size:1.1rem;max-width:600px;margin:0 auto">Descubre productos y servicios de negocios cubanos. Funciona incluso sin conexion.</p>
+    </div>
+</section>
+
+<section class="container mt-3">
+    <h2 style="margin-bottom:1rem;font-size:1.3rem">🏪 Negocios destacados</h2>
+    
+    {{if negocios:}}
+    <div class="grid grid-3">
+        {{for negocio in negocios:}}
+        <a href="{{=URL('catalogo_cuba/negocio', negocio.slug)}}" class="card product-card" style="text-decoration:none;color:inherit">
+            <div style="display:flex;align-items:center;gap:1rem">
+                {{if negocio.logo:}}
+                <img src="/catalogo_cuba/uploads/{{=negocio.logo}}" alt="{{=negocio.nombre}}" 
+                     style="width:70px;height:70px;object-fit:cover;border-radius:var(--radius);flex-shrink:0">
+                {{else:}}
+                <div style="width:70px;height:70px;background:var(--color-bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-size:2rem;flex-shrink:0">🏪</div>
+                {{pass}}
+                <div style="min-width:0">
+                    <h3 style="font-size:1rem;margin-bottom:.2rem" class="truncate">{{=negocio.nombre}}</h3>
+                    <p class="text-sm truncate">{{=negocio.descripcion or 'Sin descripcion'}}</p>
+                    {{if negocio.provincia:}}
+                    <span class="badge badge-blue">📍 {{=negocio.provincia}}</span>
+                    {{pass}}
+                </div>
+            </div>
+        </a>
+        {{pass}}
+    </div>
+    {{else:}}
+    <div class="empty-state">
+        <div style="font-size:3rem;margin-bottom:1rem">🏪</div>
+        <h3>Aun no hay negocios registrados</h3>
+        <p class="text-sm">Se el primero en crear tu catalogo</p>
+    </div>
+    {{pass}}
+</section>
+
+<section class="container mt-3 mb-3">
+    <div class="card" style="text-align:center;padding:2rem">
+        <h2 style="margin-bottom:.5rem">¿Eres dueno de un negocio?</h2>
+        <p style="color:var(--color-text-light);margin-bottom:1rem">Crea tu catalogo digital y muestra tus productos a tus clientes. Primer mes gratis.</p>
+        <a href="{{=URL('auth/register')}}" class="btn btn-primary" style="font-size:1rem;padding:.8rem 2rem">Crear mi catalogo gratis</a>
+    </div>
+</section>
+{{end}}
