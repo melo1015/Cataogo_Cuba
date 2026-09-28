@@ -44,7 +44,6 @@ session = Session(secret=settings.SESSION_SECRET_KEY)
 auth = Auth(session, db)
 
 auth.param.registration_requires_confirmation = settings.AUTH_REGISTRATION_REQUIRES_CONFIRMATION
-auth.param.registration_requires_approval = settings.AUTH_REGISTRATION_REQUIRES_APPROVAL
 
 # ============================================================
 # AUTORIZACION MEDIANTE TAGS (mecanismo oficial de py4web)
