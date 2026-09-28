@@ -1,0 +1,144 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/superadmin')}}" class="sidebar-link">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}" class="sidebar-link">🏪 Negocios</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}" class="sidebar-link">👥 Usuarios</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}" class="sidebar-link">💳 Suscripciones</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/pagos')}}" class="sidebar-link">💰 Pagos</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/configuracion')}}" class="sidebar-link active">⚙️ Configuracion</a>
+        </nav>
+    </aside>
+    
+    <div class="admin-main">
+        <h1 style="font-size:1.3rem;margin-bottom:1rem">⚙️ Configuracion Global</h1>
+        
+        <div class="card">
+            <h2 style="font-size:1.1rem;margin-bottom:1rem">Parametros del sistema</h2>
+            
+            {{if configuraciones:}}
+            <div style="overflow-x:auto">
+                <table class="table">
+                    <thead>
+                        <tr><th>Clave</th><th>Valor</th><th>Descripcion</th><th>Tipo</th><th>Acciones</th></tr>
+                    </thead>
+                    <tbody>
+                        {{for config in configuraciones:}}
+                        <tr>
+                            <td style="font-weight:500;font-family:monospace;font-size:.85rem">{{=config.clave}}</td>
+                            <td>
+                                <input type="text" id="config-{{=config.id}}" value="{{=config.valor or ''}}"
+                                       style="width:100%;min-width:200px;padding:.4rem;border:1px solid var(--border);border-radius:4px;font-size:.85rem">
+                            </td>
+                            <td class="text-sm">{{=config.descripcion or ''}}</td>
+                            <td class="text-sm">{{=config.tipo or 'string'}}</td>
+                            <td>
+                                <button onclick="guardarConfig({{=config.id}},'{{=config.clave}}')" class="btn btn-primary btn-sm">💾</button>
+                            </td>
+                        </tr>
+                        {{pass}}
+                    </tbody>
+                </table>
+            </div>
+            {{else:}}
+            <div class="empty-state">
+                <p class="text-sm">No hay configuraciones personalizadas. El sistema usa valores por defecto.</p>
+            </div>
+            {{pass}}
+        </div>
+        
+        <!-- Agregar nueva configuracion -->
+        <div class="card mt-3">
+            <h2 style="font-size:1.1rem;margin-bottom:1rem">➕ Nueva configuracion</h2>
+            <form onsubmit="return crearConfig(event)">
+                <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:.5rem">
+                    <div class="form-group">
+                        <label>Clave</label>
+                        <input type="text" id="new-clave" required placeholder="ej: costo_mensaje"
+                               style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:var(--radius)">
+                    </div>
+                    <div class="form-group">
+                        <label>Valor</label>
+                        <input type="text" id="new-valor" placeholder="Valor"
+                               style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:var(--radius)">
+                    </div>
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select id="new-tipo" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:var(--radius)">
+                            <option value="string">Texto</option>
+                            <option value="integer">Entero</option>
+                            <option value="decimal">Decimal</option>
+                            <option value="boolean">Booleano</option>
+                            <option value="json">JSON</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Descripcion</label>
+                    <input type="text" id="new-descripcion" placeholder="Descripcion de la configuracion"
+                           style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:var(--radius)">
+                </div>
+                <button type="submit" class="btn btn-primary">➕ Crear configuracion</button>
+            </form>
+        </div>
+        
+        <!-- Info del sistema -->
+        <div class="card mt-3">
+            <h2 style="font-size:1.1rem;margin-bottom:1rem">ℹ️ Informacion del sistema</h2>
+            <div class="grid grid-2" style="gap:1rem">
+                <div>
+                    <p class="text-sm">Framework: <strong>py4web</strong></p>
+                    <p class="text-sm">Base de datos: <strong>SQLite</strong></p>
+                    <p class="text-sm">Modo offline: <strong>✅ Activo (Service Worker)</strong></p>
+                </div>
+                <div>
+                    <p class="text-sm">Compresion de imagenes: <strong>✅ Activa</strong></p>
+                    <p class="text-sm">Cache de recursos: <strong>✅ Activo</strong></p>
+                    <p class="text-sm">Version: <strong>1.0.0</strong></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{block scripts}}
+<script>
+function guardarConfig(id, clave){
+    const valor = document.getElementById('config-'+id).value;
+    const form = new FormData();
+    form.append('clave', clave);
+    form.append('valor', valor);
+    
+    fetch('/catalogo_cuba/superadmin/configuracion/guardar', {method:'POST', body:form})
+    .then(r=>r.json())
+    .then(d=>{
+        if(d.exito) alert('Guardado correctamente');
+        else alert('Error: '+d.mensaje);
+    })
+    .catch(()=>alert('Error de conexion'));
+}
+
+function crearConfig(e){
+    e.preventDefault();
+    const clave = document.getElementById('new-clave').value;
+    const valor = document.getElementById('new-valor').value;
+    
+    const form = new FormData();
+    form.append('clave', clave);
+    form.append('valor', valor);
+    
+    fetch('/catalogo_cuba/superadmin/configuracion/guardar', {method:'POST', body:form})
+    .then(r=>r.json())
+    .then(d=>{
+        if(d.exito) { alert('Creado correctamente'); location.reload(); }
+        else alert('Error: '+d.mensaje);
+    })
+    .catch(()=>alert('Error de conexion'));
+    return false;
+}
+</script>
+{{end}}
