@@ -1,0 +1,128 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link {{='active' if modo=='editar' else ''}}">📦 Productos</a>
+            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link">🏷️ Categorias</a>
+            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link">📋 Inventario</a>
+            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link">💳 Suscripcion</a>
+        </nav>
+    </aside>
+    
+    <div class="admin-main">
+        <h1 style="font-size:1.3rem;margin-bottom:1rem">
+            {{='✏️ Editar: ' + (producto.nombre if producto else '') if modo=='editar' else '➕ Nuevo producto'}}
+        </h1>
+        
+        <div class="card">
+            {{=form.custom.begin}}
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:1.5rem">
+                <div>
+                    <h2 style="font-size:1rem;margin-bottom:.8rem">📋 Informacion basica</h2>
+                    
+                    <div class="form-group">
+                        <label>Nombre *</label>
+                        {{=form.custom.widgets.get('nombre', '')}}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Descripcion corta</label>
+                        {{=form.custom.widgets.get('descripcion_corta', '')}}
+                        <p class="text-sm">Maximo 200 caracteres. Aparece en la tarjeta del producto.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Descripcion completa</label>
+                        {{=form.custom.widgets.get('descripcion', '')}}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>SKU / Codigo</label>
+                        {{=form.custom.widgets.get('sku', '')}}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Categoria</label>
+                        {{=form.custom.widgets.get('categoria_id', '')}}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Tags (separados por coma)</label>
+                        {{=form.custom.widgets.get('tags', '')}}
+                    </div>
+                </div>
+                
+                <div>
+                    <h2 style="font-size:1rem;margin-bottom:.8rem">💰 Precio y stock</h2>
+                    
+                    <div class="grid" style="grid-template-columns:1fr 1fr;gap:.5rem">
+                        <div class="form-group">
+                            <label>Precio *</label>
+                            {{=form.custom.widgets.get('precio', '')}}
+                        </div>
+                        <div class="form-group">
+                            <label>Moneda</label>
+                            {{=form.custom.widgets.get('moneda', '')}}
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Precio anterior (para ofertas)</label>
+                        {{=form.custom.widgets.get('precio_anterior', '')}}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Stock</label>
+                        {{=form.custom.widgets.get('stock', '')}}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Peso (kg)</label>
+                        {{=form.custom.widgets.get('peso', '')}}
+                    </div>
+                    
+                    <h2 style="font-size:1rem;margin:.8rem 0">🖼️ Imagen</h2>
+                    
+                    <div class="form-group">
+                        <label>Imagen principal</label>
+                        {{=form.custom.widgets.get('imagen_principal', '')}}
+                        <p class="text-sm">Formato JPG/PNG. Max 2MB. Se comprimira automaticamente.</p>
+                        {{if modo=='editar' and producto and producto.imagen_principal:}}
+                        <div style="margin-top:.5rem">
+                            <img src="/catalogo_cuba/uploads/{{=producto.imagen_principal}}" 
+                                 style="max-width:150px;border-radius:var(--radius)" loading="lazy">
+                        </div>
+                        {{pass}}
+                    </div>
+                    
+                    <h2 style="font-size:1rem;margin:.8rem 0">⚙️ Opciones</h2>
+                    
+                    <div class="form-group">
+                        <label>{{=form.custom.widgets.get('disponible', '')}} Disponible / Activo</label>
+                    </div>
+                    <div class="form-group">
+                        <label>{{=form.custom.widgets.get('en_oferta', '')}} En oferta</label>
+                    </div>
+                    <div class="form-group">
+                        <label>{{=form.custom.widgets.get('destacado', '')}} Producto destacado</label>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Meta keywords (SEO)</label>
+                        {{=form.custom.widgets.get('meta_keywords', '')}}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex" style="gap:1rem;margin-top:1.5rem">
+                <button type="submit" class="btn btn-primary">💾 Guardar producto</button>
+                <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="btn btn-secondary">Cancelar</a>
+            </div>
+            {{=form.custom.end}}
+        </div>
+    </div>
+</div>
+{{end}}
