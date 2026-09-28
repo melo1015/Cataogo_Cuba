@@ -52,7 +52,6 @@ auth.param.registration_requires_approval = settings.AUTH_REGISTRATION_REQUIRES_
 
 # Tags asociados a la tabla auth_user.
 # Crea automaticamente la tabla auth_user_tag_roles con campos: id, path, record_id.
-# Ver documentacion: https://py4web.com/_documentation/static/en/chapter-13.html#authorization-using-tags
 roles_tags = Tags(db.auth_user, 'roles')
 
 # Roles disponibles en la aplicacion
