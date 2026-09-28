@@ -1,10 +1,11 @@
+[[# layout.html]]
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="CatalogoCuba - Directorio de negocios cubanos">
-    <title>{{=titulo or 'CatalogoCuba'}}</title>
+    <title>[[=titulo or 'CatalogoCuba']]</title>
     
     <!-- Preconnect para conexiones lentas -->
     <link rel="preconnect" href="/">
@@ -98,13 +99,13 @@
     </style>
     
     <!-- Manifest para PWA/Offline -->
-    <link rel="manifest" href="/catalogo_cuba/static/manifest.json">
+    <link rel="manifest" href="[[=URL('static', 'manifest.json')]]">
     
     <!-- Service Worker para modo offline -->
     <script>
         if('serviceWorker' in navigator){
             window.addEventListener('load',()=>{
-                navigator.serviceWorker.register('/catalogo_cuba/static/sw.js')
+                navigator.serviceWorker.register('[[=URL('static', 'sw.js')]]')
                     .then(r=>console.log('SW registrado'))
                     .catch(e=>console.log('SW error:',e));
             });
@@ -120,37 +121,39 @@
     <!-- Header -->
     <header class="header">
         <div class="container flex-between">
-            <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
-            <a href="{{=URL('catalogo_cuba')}}" class="logo">📦 CatalogoCuba</a>
+            <button class="mobile-menu-btn" id="btn-toggle-sidebar" type="button">☰</button>
+            <a href="[[=URL('catalogo_cuba')]]" class="logo">📦 CatalogoCuba</a>
             
             <!-- Busqueda -->
-            <form class="search-box" action="{{=URL('catalogo_cuba/buscar')}}" method="GET">
+            <form class="search-box" action="[[=URL('catalogo_cuba', 'buscar')]]" method="GET">
                 <input type="search" name="q" placeholder="Buscar productos o negocios..." 
-                       value="{{=request.params.get('q','')}}" aria-label="Buscar">
+                       value="[[=q_actual or '']]" aria-label="Buscar">
                 <button type="submit" class="btn btn-primary btn-sm">🔍</button>
             </form>
             
             <!-- Navegacion -->
             <nav class="nav-links">
-                <a href="{{=URL('catalogo_cuba')}}">Inicio</a>
-                {{if user:}}
-                    {{if es_superadmin:}}
-                        <a href="{{=URL('catalogo_cuba/superadmin')}}">Admin</a>
-                    {{elif es_comerciante:}}
-                        <a href="{{=URL('catalogo_cuba/admin')}}">Mi Negocio</a>
-                    {{pass}}
-                    <a href="{{=URL('auth/logout')}}" class="btn btn-secondary btn-sm">Cerrar</a>
-                {{else:}}
-                    <a href="{{=URL('auth/login')}}" class="btn btn-primary btn-sm">Entrar</a>
-                    <a href="{{=URL('auth/register')}}" class="btn btn-secondary btn-sm">Registrarse</a>
-                {{pass}}
+                <a href="[[=URL('catalogo_cuba')]]">Inicio</a>
+                [[if user:]]
+                    [[if rol == 'superadmin':]]
+                        <a href="[[=URL('catalogo_cuba', 'superadmin')]]">Admin</a>
+                    [[else:]]
+                        [[if rol == 'comerciante':]]
+                        <a href="[[=URL('catalogo_cuba', 'admin')]]">Mi Negocio</a>
+                        [[pass]]
+                    [[pass]]
+                    <a href="[[=URL('auth', 'logout')]]" class="btn btn-secondary btn-sm">Cerrar</a>
+                [[else:]]
+                    <a href="[[=URL('auth', 'login')]]" class="btn btn-primary btn-sm">Entrar</a>
+                    <a href="[[=URL('auth', 'register')]]" class="btn btn-secondary btn-sm">Registrarse</a>
+                [[pass]]
             </nav>
         </div>
     </header>
 
     <!-- Contenido principal -->
     <main>
-        {{block main}}{{end}}
+        [[block main]][[end]]
     </main>
 
     <!-- Footer -->
@@ -165,13 +168,12 @@
     <!-- Script para detectar conexion offline -->
     <script>
         (function(){
-            const banner=document.getElementById('offline-banner');
+            const banner = document.getElementById('offline-banner');
             function updateOnlineStatus(){
                 if(!navigator.onLine){
                     banner.classList.add('visible');
                 } else {
                     banner.classList.remove('visible');
-                    // Intentar sincronizar
                     if('serviceWorker' in navigator && 'SyncManager' in window){
                         navigator.serviceWorker.ready.then(r=>{
                             r.sync.register('sync-catalogo').catch(()=>{});
@@ -179,17 +181,20 @@
                     }
                 }
             }
-            window.addEventListener('online',updateOnlineStatus);
-            window.addEventListener('offline',updateOnlineStatus);
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
             updateOnlineStatus();
-            
+
             // Toggle sidebar movil
-            window.toggleSidebar=function(){
-                document.querySelector('.sidebar')?.classList.toggle('open');
-            };
+            const btnToggle = document.getElementById('btn-toggle-sidebar');
+            if(btnToggle){
+                btnToggle.addEventListener('click', () => {
+                    document.querySelector('.sidebar')?.classList.toggle('open');
+                });
+            }
         })();
     </script>
     
-    {{block scripts}}{{end}}
+    [[block scripts]][[end]]
 </body>
 </html>
