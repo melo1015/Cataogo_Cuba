@@ -1,0 +1,55 @@
+{
+    "name": "CatalogoCuba",
+    "short_name": "CatalogoCuba",
+    "description": "Directorio de negocios cubanos. Funciona sin conexion.",
+    "start_url": "/catalogo_cuba/",
+    "display": "standalone",
+    "background_color": "#f8fafc",
+    "theme_color": "#2563eb",
+    "orientation": "portrait-primary",
+    "scope": "/catalogo_cuba/",
+    "lang": "es",
+    "dir": "ltr",
+    "icons": [
+        {
+            "src": "/catalogo_cuba/static/icon-72.png",
+            "sizes": "72x72",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/catalogo_cuba/static/icon-96.png",
+            "sizes": "96x96",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/catalogo_cuba/static/icon-128.png",
+            "sizes": "128x128",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/catalogo_cuba/static/icon-144.png",
+            "sizes": "144x144",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/catalogo_cuba/static/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/catalogo_cuba/static/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": ["business", "shopping"],
+    "screenshots": [],
+    "related_applications": [],
+    "prefer_related_applications": false
+}
