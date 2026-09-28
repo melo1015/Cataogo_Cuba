@@ -1,0 +1,73 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<section class="container mt-3">
+    <h1 style="font-size:1.3rem;margin-bottom:1rem">🔍 {{='Resultados para: "' + query + '"' if query else 'Buscar'}}</h1>
+    
+    <!-- Tabs -->
+    <div class="tabs">
+        <a href="{{=URL('catalogo_cuba/buscar')}}?q={{=query}}&tipo=productos" class="tab {{='active' if tipo=='productos' else ''}}">📦 Productos</a>
+        <a href="{{=URL('catalogo_cuba/buscar')}}?q={{=query}}&tipo=negocios" class="tab {{='active' if tipo=='negocios' else ''}}">🏪 Negocios</a>
+    </div>
+    
+    {{if tipo == 'productos':}}
+        {{if resultados:}}
+        <p class="text-sm mb-2">{{=len(resultados)}} resultado(s) encontrado(s)</p>
+        <div class="grid grid-4">
+            {{for row in resultados:}}
+            <a href="{{=URL('catalogo_cuba/negocio', row.negocio.slug, 'producto', row.producto.slug)}}" 
+               class="card product-card" style="text-decoration:none;color:inherit;overflow:hidden">
+                {{if row.producto.imagen_principal:}}
+                <img src="/catalogo_cuba/uploads/{{=row.producto.imagen_principal}}" alt="{{=row.producto.nombre}}" class="product-img" loading="lazy">
+                {{else:}}
+                <div class="product-img flex" style="justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem">📦</div>
+                {{pass}}
+                <div class="product-info">
+                    <h3 class="product-name truncate">{{=row.producto.nombre}}</h3>
+                    <p class="text-sm truncate">{{=row.negocio.nombre}}</p>
+                    {{if row.producto.precio:}}
+                    <span class="product-price">{{='%.2f' % row.producto.precio}} {{=row.producto.moneda or 'CUP'}}</span>
+                    {{pass}}
+                </div>
+            </a>
+            {{pass}}
+        </div>
+        {{elif query:}}
+        <div class="empty-state">
+            <div style="font-size:3rem;margin-bottom:1rem">🔍</div>
+            <h3>No se encontraron productos</h3>
+            <p class="text-sm">Intenta con otros terminos de busqueda</p>
+        </div>
+        {{pass}}
+    
+    {{else:}}
+        {{if negocios:}}
+        <p class="text-sm mb-2">{{=len(negocios)}} negocio(s) encontrado(s)</p>
+        <div class="grid grid-3">
+            {{for negocio in negocios:}}
+            <a href="{{=URL('catalogo_cuba/negocio', negocio.slug)}}" class="card product-card" style="text-decoration:none;color:inherit">
+                <div style="display:flex;align-items:center;gap:1rem">
+                    {{if negocio.logo:}}
+                    <img src="/catalogo_cuba/uploads/{{=negocio.logo}}" alt="{{=negocio.nombre}}" 
+                         style="width:60px;height:60px;object-fit:cover;border-radius:var(--radius);flex-shrink:0">
+                    {{else:}}
+                    <div style="width:60px;height:60px;background:var(--color-bg);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-size:1.8rem;flex-shrink:0">🏪</div>
+                    {{pass}}
+                    <div style="min-width:0">
+                        <h3 style="font-size:1rem;margin-bottom:.2rem" class="truncate">{{=negocio.nombre}}</h3>
+                        <p class="text-sm truncate">{{=negocio.descripcion or ''}}</p>
+                    </div>
+                </div>
+            </a>
+            {{pass}}
+        </div>
+        {{elif query:}}
+        <div class="empty-state">
+            <div style="font-size:3rem;margin-bottom:1rem">🔍</div>
+            <h3>No se encontraron negocios</h3>
+            <p class="text-sm">Intenta con otros terminos de busqueda</p>
+        </div>
+        {{pass}}
+    {{pass}}
+</section>
+{{end}}
