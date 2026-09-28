@@ -1,446 +1,548 @@
 """
 Controladores - CatalogoCuba
-Define todas las acciones/rutas de la aplicacion
+Define todas las acciones/rutas de la aplicacion (py4web)
 """
 import os
 import json
 from datetime import datetime, timedelta
-from py4web import action, request, response, redirect, URL, HTTP, abort
-from py4web.utils.form import Form
-from pydal.validators import *
+from urllib.parse import quote
+
+from py4web import action, request, response, redirect, URL, HTTP
+from py4web.utils.form import Form, FormStyleBulma
+from py4web.utils.factories import ActionFactory
+from pydal.validators import IS_EMPTY_OR, IS_IN_DB
 
 from .common import (
-    db, session, auth, translator,
-    settings, respuesta_json, registrar_visita,
-    guardar_imagen, optimizar_imagen, slugify,
-    es_superadmin, es_comerciante, requiere_rol,
-    ahora_cuba, formatear_fecha, formatear_fecha_corta
+    db, session, auth, settings,
+    respuesta_json, registrar_visita,
+    guardar_imagen, slugify,
+    es_superadmin, es_comerciante,
+    ahora_cuba, formatear_fecha,
 )
 
 # ============================================================
 # HELPERS
 # ============================================================
 
-def obtener_negocio_por_slug(slug):
-    """Obtiene un negocio por su slug, verificando que este activo."""
-    negocio = db(db.negocio.slug == slug)(db.negocio.activo == True)(db.negocio.aprobado == True).select().first()
-    return negocio
+def get_client_ip():
+    return request.environ.get(
+        "HTTP_X_FORWARDED_FOR",
+        request.environ.get("REMOTE_ADDR", "")
+    )
 
-def obtener_negocio_del_usuario():
-    """Obtiene el negocio asociado al usuario actual."""
-    user = auth.get_user()
+
+def _calcular_rol(user):
+    """Calcula el rol del usuario actual para el layout."""
     if not user:
         return None
-    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
-    return negocio
-
-def verificar_propietario_negocio(negocio_id):
-    """Verifica que el usuario actual sea propietario del negocio."""
-    user = auth.get_user()
-    if not user:
-        return False
     if es_superadmin():
-        return True
-    negocio = db(db.negocio.id == negocio_id).select().first()
-    return negocio and negocio.usuario_id == user["id"]
+        return 'superadmin'
+    if es_comerciante():
+        return 'comerciante'
+    return 'cliente'
 
-def get_client_ip():
-    """Obtiene la IP del cliente."""
-    return request.environ.get("HTTP_X_FORWARDED_FOR", request.environ.get("REMOTE_ADDR", ""))
-
-def serializar_producto(producto, negocio_slug=""):
-    """Serializa un producto a diccionario para JSON."""
-    categoria = None
-    if producto.categoria_id:
-        cat = db.categoria[producto.categoria_id]
-        if cat:
-            categoria = {"id": cat.id, "nombre": cat.nombre, "slug": cat.slug}
-    
-    return {
-        "id": producto.id,
-        "nombre": producto.nombre,
-        "slug": producto.slug,
-        "descripcion": producto.descripcion or "",
-        "descripcion_corta": producto.descripcion_corta or "",
-        "precio": str(producto.precio) if producto.precio else "0",
-        "precio_anterior": str(producto.precio_anterior) if producto.precio_anterior else None,
-        "moneda": producto.moneda or "CUP",
-        "disponible": producto.disponible,
-        "en_oferta": producto.en_oferta,
-        "stock": producto.stock or 0,
-        "sku": producto.sku or "",
-        "categoria": categoria,
-        "imagen_principal": f"/catalogo_cuba/uploads/{producto.imagen_principal}" if producto.imagen_principal else None,
-        "destacado": producto.destacado,
-        "tags": producto.tags or [],
-        "peso": str(producto.peso) if producto.peso else None,
-        "vistas": producto.vistas or 0,
-        "negocio_slug": negocio_slug,
-    }
-
-def serializar_negocio(negocio):
-    """Serializa un negocio a diccionario para JSON."""
-    return {
-        "id": negocio.id,
-        "nombre": negocio.nombre,
-        "slug": negocio.slug,
-        "descripcion": negocio.descripcion or "",
-        "logo": f"/catalogo_cuba/uploads/{negocio.logo}" if negocio.logo else None,
-        "direccion": negocio.direccion or "",
-        "telefono": negocio.telefono or "",
-        "email": negocio.email or "",
-        "whatsapp": negocio.whatsapp or "",
-        "horario": negocio.horario or "",
-        "provincia": negocio.provincia or "",
-        "municipio": negocio.municipio or "",
-        "color_tema": negocio.color_tema or "#2563eb",
-        "moneda_principal": negocio.moneda_principal or "CUP",
-        "mostrar_precios": negocio.mostrar_precios,
-        "facebook": negocio.facebook or "",
-        "instagram": negocio.instagram or "",
-        "telegram": negocio.telegram or "",
-    }
-
-def paginar(query, pagina=1, page_size=None):
-    """Pagina una consulta pyDAL."""
-    if page_size is None:
-        page_size = settings.PAGE_SIZE
-    total = db(query).count()
-    total_paginas = (total + page_size - 1) // page_size if total > 0 else 1
-    pagina = max(1, min(pagina, total_paginas))
-    offset = (pagina - 1) * page_size
-    registros = db(query).select(limitby=(offset, offset + page_size))
-    return {
-        "registros": registros,
-        "total": total,
-        "pagina": pagina,
-        "total_paginas": total_paginas,
-        "page_size": page_size,
-    }
-
-# ============================================================
-# CONTEXTO COMUN PARA TEMPLATES
-# ============================================================
 
 def contexto_base():
-    """Contexto base para todos los templates."""
+    """
+    Fixture que inyecta en el contexto de todas las plantillas:
+      - user
+      - rol
+      - q_actual
+    Tambien se inyecta 'titulo' cuando la accion lo pase explicitamente.
+    """
     user = auth.get_user()
-    return {
-        "user": user,
-        "es_superadmin": es_superadmin(),
-        "es_comerciante": es_comerciante(),
-        "URL": URL,
-        "ahora": ahora_cuba(),
+    return dict(
+        user=user,
+        rol=_calcular_rol(user),
+        q_actual=request.query.get('q', ''),
+    )
+
+
+# ActionFactory con contexto comun; cada accion puede ampliarlo
+AccionBase = ActionFactory(contexto_base, db, session, auth.user)
+
+
+# --- Serializadores y preparadores -----------------------------------------
+
+def _preparar_producto(p, negocio, con_detalle=False):
+    """
+    Prepara un producto con los campos que esperan las vistas.
+    Si con_detalle=True, agrega badge_stock y whatsapp_url.
+    """
+    stock = p.stock or 0
+
+    # Badge de estado (listado)
+    badge_estado_texto = ''
+    badge_estado_clase = ''
+    if not p.disponible:
+        badge_estado_texto, badge_estado_clase = 'Agotado', 'badge-red'
+    elif p.stock is not None and stock <= 5:
+        badge_estado_texto, badge_estado_clase = 'Quedan %d' % stock, 'badge-yellow'
+
+    # Badge de stock (detalle)
+    badge_stock_texto = ''
+    badge_stock_clase = ''
+    if p.stock is None:
+        badge_stock_texto, badge_stock_clase = '', ''
+    elif stock <= 0:
+        badge_stock_texto, badge_stock_clase = '❌ Agotado', 'badge-red'
+    elif stock <= 5:
+        badge_stock_texto, badge_stock_clase = '⚠️ Quedan %d unidades' % stock, 'badge-yellow'
+    else:
+        badge_stock_texto, badge_stock_clase = '✅ En stock (%d)' % stock, 'badge-green'
+
+    mostrar_precio = bool(negocio.mostrar_precios and p.precio)
+    mostrar_precio_anterior = bool(p.precio_anterior and p.en_oferta and negocio.mostrar_precios)
+
+    data = {
+        'id': p.id,
+        'nombre': p.nombre,
+        'slug': p.slug,
+        'descripcion': p.descripcion,
+        'descripcion_corta': p.descripcion_corta,
+        'sku': p.sku,
+        'peso': p.peso,
+        'stock': stock,
+        'vistas': p.vistas or 0,
+        'imagen_principal': p.imagen_principal,
+        'en_oferta': p.en_oferta,
+        'destacado': p.destacado,
+        'disponible': p.disponible,
+        'categoria_id': p.categoria_id,
+        'mostrar_precio': mostrar_precio,
+        'precio_texto': ('%.2f %s' % (p.precio, p.moneda or 'CUP')) if p.precio else None,
+        'mostrar_precio_anterior': mostrar_precio_anterior,
+        'precio_anterior_texto': ('%.2f %s' % (p.precio_anterior, p.moneda or 'CUP')) if p.precio_anterior else None,
+        'badge_estado_texto': badge_estado_texto,
+        'badge_estado_clase': badge_estado_clase,
     }
 
+    if con_detalle:
+        tags = [t.strip() for t in (p.tags or '').split(',') if t.strip()] if isinstance(p.tags, str) else (p.tags or [])
+        whatsapp_url = None
+        if negocio.whatsapp:
+            texto = 'Hola, me interesa el producto: %s' % p.nombre
+            whatsapp_url = 'https://wa.me/%s?text=%s' % (negocio.whatsapp, quote(texto))
+
+        data.update({
+            'badge_stock_texto': badge_stock_texto,
+            'badge_stock_clase': badge_stock_clase,
+            'tags_lista': tags,
+            'whatsapp_url': whatsapp_url,
+        })
+
+    return data
+
+
+def _preparar_suscripcion(s):
+    """Prepara una suscripcion para la vista admin_suscripcion."""
+    if not s:
+        return None
+
+    estados_badge = {
+        'activa':    ('badge-green',  '✅ Activa'),
+        'prueba':    ('badge-blue',   '🎁 Periodo de prueba'),
+        'vencida':   ('badge-red',    '❌ Vencida'),
+        'pendiente': ('badge-yellow', '⏳ Pendiente de pago'),
+    }
+    clase, texto = estados_badge.get(s.estado, ('badge-yellow', s.estado))
+
+    metodos_texto = {
+        'transfermovil': '📱 Transfermovil',
+        'presencial':    '💵 Pago presencial',
+        'usdt':          '💎 USDT',
+        'prueba':        '🎁 Gratis',
+    }
+    metodo_texto = metodos_texto.get(s.metodo_pago, '-')
+
+    return {
+        'id': s.id,
+        'estado': s.estado,
+        'estado_badge_clase': clase,
+        'estado_badge_texto': texto,
+        'metodo_pago_texto': metodo_texto,
+        'fecha_inicio_texto': s.fecha_inicio.strftime('%d/%m/%Y') if s.fecha_inicio else '-',
+        'fecha_fin_texto': s.fecha_fin.strftime('%d/%m/%Y') if s.fecha_fin else '-',
+        'monto_pagado_texto': '%.2f %s' % (s.monto_pagado or 0, s.moneda_pago or 'CUP'),
+        'necesita_renovacion': s.estado in ('vencida', 'pendiente'),
+    }
+
+
+def _preparar_pago(p, negocio_nombre=None, usuario_email=None):
+    """Prepara un pago para la vista admin_suscripcion o superadmin_pagos."""
+    estados = {
+        'validado':   ('badge-green',  '✅ Validado'),
+        'pendiente':  ('badge-yellow', '⏳ Pendiente'),
+        'rechazado':  ('badge-red',    '❌ Rechazado'),
+        'en_proceso': ('badge-blue',   '🔄 En proceso'),
+    }
+    metodos = {
+        'transfermovil': '📱 Transfermovil',
+        'presencial':    '💵 Presencial',
+        'usdt':          '💎 USDT',
+    }
+    clase, texto = estados.get(p.estado, ('badge-blue', p.estado))
+    metodo_texto = metodos.get(p.metodo_pago, p.metodo_pago or '-')
+
+    return {
+        'id': p.id,
+        'metodo_pago_texto': metodo_texto,
+        'monto_texto': '%.2f %s' % (p.monto or 0, p.moneda or 'CUP'),
+        'referencia': p.referencia,
+        'estado': p.estado,
+        'estado_badge_clase': clase,
+        'estado_badge_texto': texto,
+        'fecha_solicitud_texto': p.fecha_solicitud.strftime('%d/%m/%Y %H:%M') if p.fecha_solicitud else '-',
+        'fecha_validacion_texto': p.fecha_validacion.strftime('%d/%m/%Y') if p.fecha_validacion else '-',
+        'nombre_negocio': negocio_nombre,
+        'email_usuario': usuario_email,
+        'mostrar_acciones': p.estado in ('pendiente', 'en_proceso'),
+    }
+
+
 # ============================================================
-# RUTAS PUBLICAS - CATALOGO
+# RUTAS PUBLICAS
 # ============================================================
 
 @action("catalogo_cuba")
-@action.uses(auth, "catalogo_home.html")
+@action.uses(AccionBase, "catalogo_home.html")
 def catalogo_home():
-    """Pagina principal - lista de negocios activos."""
-    # Obtener negocios destacados/aprobados
-    negocios = db(db.negocio.activo == True)(db.negocio.aprobado == True).select(
-        orderby=~db.negocio.fecha_creacion,
-        limitby=(0, 20)
-    )
-    
-    return dict(
-        **contexto_base(),
-        negocios=negocios,
-        titulo="CatalogoCuba - Directorio de Negocios",
-    )
+    negocios_raw = db(
+        (db.negocio.activo == True) & (db.negocio.aprobado == True)
+    ).select(orderby=~db.negocio.fecha_creacion, limitby=(0, 20))
+
+    negocios = [{
+        'id': n.id,
+        'nombre': n.nombre,
+        'slug': n.slug,
+        'descripcion': n.descripcion,
+        'provincia': n.provincia,
+        'logo': n.logo,
+    } for n in negocios_raw]
+
+    return dict(negocios=negocios, titulo="CatalogoCuba - Directorio de Negocios")
+
 
 @action("catalogo_cuba/negocio/<slug>")
-@action.uses(auth, "catalogo_negocio.html")
+@action.uses(AccionBase, "catalogo_negocio.html")
 def catalogo_negocio(slug):
-    """Pagina publica de un negocio con su catalogo."""
-    negocio = obtener_negocio_por_slug(slug)
+    negocio = db(
+        (db.negocio.slug == slug) &
+        (db.negocio.activo == True) &
+        (db.negocio.aprobado == True)
+    ).select().first()
     if not negocio:
         raise HTTP(404, "Negocio no encontrado")
-    
-    # Registrar visita
+
     registrar_visita(negocio_id=negocio.id, ip=get_client_ip(),
-                    user_agent=request.environ.get("HTTP_USER_AGENT", ""))
-    
-    # Obtener categorias del negocio
-    categorias = db(db.categoria.negocio_id == negocio.id)(db.categoria.activa == True).select(
-        orderby=db.categoria.orden
-    )
-    
-    # Obtener productos destacados
-    destacados = db(db.producto.negocio_id == negocio.id)(
-        db.producto.disponible == True)(db.producto.destacado == True).select(
-        orderby=~db.producto.fecha_creacion,
-        limitby=(0, 8)
-    )
-    
-    # Obtener todos los productos disponibles
-    productos = db(db.producto.negocio_id == negocio.id)(
-        db.producto.disponible == True).select(
-        orderby=~db.producto.fecha_creacion,
-        limitby=(0, settings.PAGE_SIZE)
-    )
-    
-    # Verificar si la suscripcion esta activa
+                     user_agent=request.environ.get("HTTP_USER_AGENT", ""))
+
+    categorias_raw = db(
+        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+    ).select(orderby=db.categoria.orden)
+    categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
+
+    destacados_raw = db(
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.disponible == True) &
+        (db.producto.destacado == True)
+    ).select(orderby=~db.producto.fecha_creacion, limitby=(0, 8))
+    destacados = [_preparar_producto(p, negocio) for p in destacados_raw]
+
+    productos_raw = db(
+        (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
+    ).select(orderby=~db.producto.fecha_creacion, limitby=(0, settings.PAGE_SIZE))
+    productos = [_preparar_producto(p, negocio) for p in productos_raw]
+
     suscripcion_activa = verificar_suscripcion_activa(negocio.id)
-    
+
     return dict(
-        **contexto_base(),
         negocio=negocio,
         categorias=categorias,
         destacados=destacados,
         productos=productos,
         suscripcion_activa=suscripcion_activa,
-        titulo=f"{negocio.nombre} - Catalogo",
+        titulo="%s - Catalogo" % negocio.nombre,
     )
+
 
 @action("catalogo_cuba/negocio/<slug>/categoria/<categoria_slug>")
-@action.uses(auth, "catalogo_categoria.html")
+@action.uses(AccionBase, "catalogo_negocio.html")
 def catalogo_por_categoria(slug, categoria_slug):
-    """Productos de un negocio filtrados por categoria."""
-    negocio = obtener_negocio_por_slug(slug)
+    negocio = db(
+        (db.negocio.slug == slug) &
+        (db.negocio.activo == True) & (db.negocio.aprobado == True)
+    ).select().first()
     if not negocio:
         raise HTTP(404, "Negocio no encontrado")
-    
-    categoria = db(db.categoria.negocio_id == negocio.id)(
-        db.categoria.slug == categoria_slug).select().first()
-    
+
+    categoria = db(
+        (db.categoria.negocio_id == negocio.id) & (db.categoria.slug == categoria_slug)
+    ).select().first()
     if not categoria:
         raise HTTP(404, "Categoria no encontrada")
-    
-    # Productos de esta categoria
-    productos = db(db.producto.negocio_id == negocio.id)(
-        db.producto.categoria_id == categoria.id)(
-        db.producto.disponible == True).select(
-        orderby=~db.producto.fecha_creacion
-    )
-    
-    # Todas las categorias para el menu
-    categorias = db(db.categoria.negocio_id == negocio.id)(db.categoria.activa == True).select(
-        orderby=db.categoria.orden
-    )
-    
+
+    productos_raw = db(
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.categoria_id == categoria.id) &
+        (db.producto.disponible == True)
+    ).select(orderby=~db.producto.fecha_creacion)
+    productos = [_preparar_producto(p, negocio) for p in productos_raw]
+
+    categorias_raw = db(
+        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+    ).select(orderby=db.categoria.orden)
+    categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
+
     return dict(
-        **contexto_base(),
         negocio=negocio,
-        categoria=categoria,
         categorias=categorias,
+        destacados=[],
         productos=productos,
-        titulo=f"{categoria.nombre} - {negocio.nombre}",
+        suscripcion_activa=verificar_suscripcion_activa(negocio.id),
+        titulo="%s - %s" % (categoria.nombre, negocio.nombre),
     )
 
+
 @action("catalogo_cuba/negocio/<slug>/producto/<producto_slug>")
-@action.uses(auth, "catalogo_producto.html")
+@action.uses(AccionBase, "catalogo_producto.html")
 def catalogo_producto_detalle(slug, producto_slug):
-    """Pagina de detalle de un producto."""
-    negocio = obtener_negocio_por_slug(slug)
+    negocio = db(
+        (db.negocio.slug == slug) &
+        (db.negocio.activo == True) & (db.negocio.aprobado == True)
+    ).select().first()
     if not negocio:
         raise HTTP(404, "Negocio no encontrado")
-    
-    producto = db(db.producto.negocio_id == negocio.id)(
-        db.producto.slug == producto_slug).select().first()
-    
+
+    producto = db(
+        (db.producto.negocio_id == negocio.id) & (db.producto.slug == producto_slug)
+    ).select().first()
     if not producto:
         raise HTTP(404, "Producto no encontrado")
-    
-    # Incrementar contador de vistas
+
     db(db.producto.id == producto.id).update(vistas=(producto.vistas or 0) + 1)
     db.commit()
-    
-    # Registrar visita
+
     registrar_visita(negocio_id=negocio.id, producto_id=producto.id,
-                    ip=get_client_ip(),
-                    user_agent=request.environ.get("HTTP_USER_AGENT", ""))
-    
-    # Productos relacionados (misma categoria)
+                     ip=get_client_ip(),
+                     user_agent=request.environ.get("HTTP_USER_AGENT", ""))
+
     relacionados = []
     if producto.categoria_id:
-        relacionados = db(db.producto.categoria_id == producto.categoria_id)(
-            db.producto.id != producto.id)(
-            db.producto.disponible == True).select(
-            orderby=~db.producto.vistas,
-            limitby=(0, 4)
-        )
-    
+        rel_raw = db(
+            (db.producto.categoria_id == producto.categoria_id) &
+            (db.producto.id != producto.id) &
+            (db.producto.disponible == True)
+        ).select(orderby=~db.producto.vistas, limitby=(0, 4))
+        relacionados = [_preparar_producto(r, negocio) for r in rel_raw]
+
+    producto_dict = _preparar_producto(producto, negocio, con_detalle=True)
+
+    negocio_dict = {
+        'id': negocio.id,
+        'nombre': negocio.nombre,
+        'slug': negocio.slug,
+        'logo': negocio.logo,
+        'telefono': negocio.telefono,
+        'whatsapp': negocio.whatsapp,
+        'provincia': negocio.provincia,
+        'mostrar_precios': negocio.mostrar_precios,
+    }
+
     return dict(
-        **contexto_base(),
-        negocio=negocio,
-        producto=producto,
+        negocio=negocio_dict,
+        producto=producto_dict,
         relacionados=relacionados,
-        titulo=f"{producto.nombre} - {negocio.nombre}",
+        titulo="%s - %s" % (producto.nombre, negocio.nombre),
     )
+
 
 # ============================================================
 # BUSQUEDA PUBLICA
 # ============================================================
 
 @action("catalogo_cuba/buscar")
-@action.uses(auth, "catalogo_busqueda.html")
+@action.uses(AccionBase, "catalogo_busqueda.html")
 def catalogo_buscar():
-    """Busqueda publica de productos y negocios."""
-    query = request.params.get("q", "").strip()
-    tipo = request.params.get("tipo", "productos")
-    
+    query_texto = request.query.get("q", "").strip()
+    tipo = request.query.get("tipo", "productos")
+
     resultados = []
     negocios = []
-    
-    if query:
+    total_resultados = 0
+    total_negocios = 0
+
+    if query_texto:
         if tipo == "productos":
-            resultados = db(db.producto.nombre.contains(query, case_sensitive=False))(
-                db.producto.disponible == True)(
-                db.producto.negocio_id == db.negocio.id)(
-                db.negocio.activo == True)(
-                db.negocio.aprobado == True
-            ).select(
-                db.producto.ALL, db.negocio.slug,
-                orderby=~db.producto.fecha_creacion,
-                limitby=(0, 50)
-            )
+            rows = db(
+                db.producto.nombre.contains(query_texto, case_sensitive=False) &
+                (db.producto.disponible == True) &
+                (db.producto.negocio_id == db.negocio.id) &
+                (db.negocio.activo == True) & (db.negocio.aprobado == True)
+            ).select(db.producto.ALL, db.negocio.ALL,
+                     orderby=~db.producto.fecha_creacion, limitby=(0, 50))
+
+            for r in rows:
+                producto = r.producto
+                negocio = r.negocio
+                resultados.append({
+                    'producto': {
+                        'id': producto.id,
+                        'nombre': producto.nombre,
+                        'slug': producto.slug,
+                        'imagen_principal': producto.imagen_principal,
+                        'precio_texto': ('%.2f %s' % (producto.precio, producto.moneda or 'CUP')) if producto.precio else None,
+                    },
+                    'negocio': {
+                        'id': negocio.id,
+                        'nombre': negocio.nombre,
+                        'slug': negocio.slug,
+                    },
+                })
+            total_resultados = len(resultados)
+
         elif tipo == "negocios":
-            negocios = db(db.negocio.nombre.contains(query, case_sensitive=False))(
-                db.negocio.activo == True)(
-                db.negocio.aprobado == True
+            neg_raw = db(
+                db.negocio.nombre.contains(query_texto, case_sensitive=False) &
+                (db.negocio.activo == True) & (db.negocio.aprobado == True)
             ).select(orderby=db.negocio.nombre)
-    
+            negocios = [{
+                'id': n.id,
+                'nombre': n.nombre,
+                'slug': n.slug,
+                'descripcion': n.descripcion,
+                'logo': n.logo,
+            } for n in neg_raw]
+            total_negocios = len(negocios)
+
     return dict(
-        **contexto_base(),
-        query=query,
+        query=query_texto,
         tipo=tipo,
         resultados=resultados,
         negocios=negocios,
-        titulo=f"Buscar: {query}" if query else "Buscar",
+        total_resultados=total_resultados,
+        total_negocios=total_negocios,
+        titulo="Buscar: %s" % query_texto if query_texto else "Buscar",
     )
 
+
 # ============================================================
-# API PUBLICA - PARA MODO OFFLINE
+# API PUBLICA (JSON)
 # ============================================================
 
 @action("catalogo_cuba/api/negocio/<slug>/catalogo")
-@action.uses()
+@action.uses(db, contexto_base)
 def api_catalogo_negocio(slug):
-    """
-    API publica que retorna el catalogo completo de un negocio en JSON.
-    Usado por el Service Worker para cachear el catalogo offline.
-    """
-    negocio = obtener_negocio_por_slug(slug)
+    negocio = db(
+        (db.negocio.slug == slug) &
+        (db.negocio.activo == True) & (db.negocio.aprobado == True)
+    ).select().first()
     if not negocio:
         return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
-    
-    # Verificar suscripcion activa
+
     if not verificar_suscripcion_activa(negocio.id):
         return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
-    
-    # Obtener categorias
-    categorias_raw = db(db.categoria.negocio_id == negocio.id)(db.categoria.activa == True).select(
-        orderby=db.categoria.orden
-    )
-    categorias = []
-    for c in categorias_raw:
-        categorias.append({
-            "id": c.id, "nombre": c.nombre, "slug": c.slug,
-            "descripcion": c.descripcion or "",
-            "imagen": f"/catalogo_cuba/uploads/{c.imagen}" if c.imagen else None,
-        })
-    
-    # Obtener productos
-    productos_raw = db(db.producto.negocio_id == negocio.id)(
-        db.producto.disponible == True).select(orderby=~db.producto.fecha_creacion)
-    productos = [serializar_producto(p, negocio.slug) for p in productos_raw]
-    
-    # Info del negocio serializada
-    negocio_json = serializar_negocio(negocio)
-    
+
+    categorias_raw = db(
+        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+    ).select(orderby=db.categoria.orden)
+    categorias = [{
+        'id': c.id, 'nombre': c.nombre, 'slug': c.slug,
+        'descripcion': c.descripcion or '',
+        'imagen': c.imagen,
+    } for c in categorias_raw]
+
+    productos_raw = db(
+        (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
+    ).select(orderby=~db.producto.fecha_creacion)
+    productos = [_preparar_producto(p, negocio) for p in productos_raw]
+
     response.headers["Cache-Control"] = "public, max-age=3600"
-    response.headers["Content-Type"] = "application/json"
-    
-    return json.dumps({
-        "exito": True,
-        "negocio": negocio_json,
-        "categorias": categorias,
-        "productos": productos,
-        "total_productos": len(productos),
-        "fecha_actualizacion": formatear_fecha(ahora_cuba()),
-    })
+    return dict(
+        exito=True,
+        negocio={
+            'id': negocio.id, 'nombre': negocio.nombre, 'slug': negocio.slug,
+            'descripcion': negocio.descripcion or '',
+            'logo': negocio.logo,
+            'telefono': negocio.telefono or '',
+            'whatsapp': negocio.whatsapp or '',
+            'provincia': negocio.provincia or '',
+            'municipio': negocio.municipio or '',
+            'mostrar_precios': negocio.mostrar_precios,
+        },
+        categorias=categorias,
+        productos=productos,
+        total_productos=len(productos),
+    )
+
 
 @action("catalogo_cuba/api/negocio/<slug>/producto/<producto_slug>")
-@action.uses()
+@action.uses(db, contexto_base)
 def api_producto_detalle(slug, producto_slug):
-    """API para obtener detalle de un producto especifico."""
-    negocio = obtener_negocio_por_slug(slug)
+    negocio = db((db.negocio.slug == slug)).select().first()
     if not negocio:
         return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
-    
-    producto = db(db.producto.negocio_id == negocio.id)(
-        db.producto.slug == producto_slug).select().first()
-    
+
+    producto = db(
+        (db.producto.negocio_id == negocio.id) & (db.producto.slug == producto_slug)
+    ).select().first()
     if not producto:
         return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
-    
+
     response.headers["Cache-Control"] = "public, max-age=3600"
-    response.headers["Content-Type"] = "application/json"
-    
-    return json.dumps({
-        "exito": True,
-        "producto": serializar_producto(producto, negocio.slug),
-    })
+    return dict(exito=True, producto=_preparar_producto(producto, negocio, con_detalle=True))
+
 
 # ============================================================
-# PANEL DE COMERCIANTE - DASHBOARD
+# PANEL DE COMERCIANTE
 # ============================================================
 
 @action("catalogo_cuba/admin")
-@action.uses(auth, session, "admin_dashboard.html")
+@action.uses(AccionBase, "admin_dashboard.html")
 def admin_dashboard():
-    """Dashboard principal del comerciante."""
     user = auth.get_user()
     if not user:
-        return redirect(URL("auth/login"))
-    
+        redirect(URL("auth", "login"))
     if es_superadmin():
-        return redirect(URL("catalogo_cuba/superadmin"))
-    
+        redirect(URL("catalogo_cuba", "superadmin"))
     if not es_comerciante():
-        raise HTTP(403, "Acceso denegado")
-    
-    negocio = obtener_negocio_del_usuario()
+        raise HTTP(403)
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        # Redirigir a crear negocio
-        return redirect(URL("catalogo_cuba/admin/negocio/nuevo"))
-    
-    # Estadisticas basicas
+        redirect(URL("catalogo_cuba", "admin", "negocio", "nuevo"))
+
     total_productos = db(db.producto.negocio_id == negocio.id).count()
-    productos_activos = db(db.producto.negocio_id == negocio.id)(
-        db.producto.disponible == True).count()
+    productos_activos = db(
+        (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
+    ).count()
     total_categorias = db(db.categoria.negocio_id == negocio.id).count()
-    
-    # Visitas recientes (ultimos 7 dias)
+
     hace_7_dias = ahora_cuba() - timedelta(days=7)
-    visitas_recientes = db(db.visita.negocio_id == negocio.id)(
-        db.visita.fecha >= hace_7_dias).count()
-    
-    # Productos mas vistos
-    mas_vistos = db(db.producto.negocio_id == negocio.id).select(
-        orderby=~db.producto.vistas,
-        limitby=(0, 5)
+    visitas_recientes = db(
+        (db.visita.negocio_id == negocio.id) & (db.visita.fecha >= hace_7_dias)
+    ).count()
+
+    mas_vistos_raw = db(db.producto.negocio_id == negocio.id).select(
+        orderby=~db.producto.vistas, limitby=(0, 5)
     )
-    
-    # Estado de suscripcion
-    suscripcion = db(db.suscripcion.negocio_id == negocio.id).select(
-        orderby=~db.suscripcion.fecha_creacion,
-        limitby=(0, 1)
+    mas_vistos = [_preparar_producto(p, negocio) for p in mas_vistos_raw]
+
+    suscripcion_raw = db(db.suscripcion.negocio_id == negocio.id).select(
+        orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)
     ).first()
-    
-    # Productos con bajo stock
-    bajo_stock = db(db.producto.negocio_id == negocio.id)(
-        db.producto.stock <= 5)(
-        db.producto.disponible == True).select()
-    
+    suscripcion = _preparar_suscripcion(suscripcion_raw)
+
+    bajo_stock_raw = db(
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.stock <= 5) & (db.producto.disponible == True)
+    ).select()
+    bajo_stock = [{'id': p.id, 'nombre': p.nombre, 'stock': p.stock or 0} for p in bajo_stock_raw]
+
     return dict(
-        **contexto_base(),
-        negocio=negocio,
+        negocio={
+            'id': negocio.id, 'nombre': negocio.nombre, 'slug': negocio.slug,
+        },
         total_productos=total_productos,
         productos_activos=productos_activos,
         total_categorias=total_categorias,
@@ -448,664 +550,611 @@ def admin_dashboard():
         mas_vistos=mas_vistos,
         suscripcion=suscripcion,
         bajo_stock=bajo_stock,
-        titulo=f"Panel - {negocio.nombre}",
+        titulo="Panel - %s" % negocio.nombre,
     )
 
+
 # ============================================================
-# CRUD NEGOCIO (COMERCIANTE)
+# CRUD NEGOCIO
 # ============================================================
 
-@action("catalogo_cuba/admin/negocio/nuevo")
-@action.uses(auth, session, db, "admin_negocio_form.html")
+@action("catalogo_cuba/admin/negocio/nuevo", method=["GET", "POST"])
+@action.uses(AccionBase, "admin_negocio_form.html")
 def admin_negocio_nuevo():
-    """Crear nuevo negocio."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    # Verificar que no tenga ya un negocio
-    existe = db(db.negocio.usuario_id == user["id"]).count()
-    if existe > 0:
-        return redirect(URL("catalogo_cuba/admin"))
-    
-    form = Form(
-        db.negocio,
-        fields=[
-            "nombre", "descripcion", "direccion", "telefono",
-            "email", "whatsapp", "horario", "provincia", "municipio",
-            "color_tema", "moneda_principal", "mostrar_precios",
-            "facebook", "instagram", "telegram", "meta_descripcion",
-        ],
-        deletable=False,
-        formstyle=FormStyleDefault,
-    )
-    
+
+    if db(db.negocio.usuario_id == user["id"]).count() > 0:
+        redirect(URL("catalogo_cuba", "admin"))
+
+    campos = [
+        "nombre", "descripcion", "direccion", "telefono",
+        "email", "whatsapp", "horario", "provincia", "municipio",
+        "color_tema", "moneda_principal", "mostrar_precios",
+        "facebook", "instagram", "telegram", "meta_descripcion",
+    ]
+    form = Form(db.negocio, fields=campos, deletable=False, formstyle=FormStyleBulma)
+
     if form.accepted:
-        # Asignar usuario y generar slug
         negocio_id = form.vars.get("id")
         nombre = form.vars.get("nombre", "")
         slug = slugify(nombre)
-        
-        # Verificar unicidad del slug
         contador = 1
         slug_original = slug
         while db(db.negocio.slug == slug).count() > 0:
-            slug = f"{slug_original}-{contador}"
+            slug = "%s-%d" % (slug_original, contador)
             contador += 1
-        
+
         db(db.negocio.id == negocio_id).update(
-            usuario_id=user["id"],
-            slug=slug,
-            fecha_creacion=ahora_cuba(),
-            fecha_actualizacion=ahora_cuba(),
-            activo=True,
-            aprobado=False,  # Requiere aprobacion del admin
+            usuario_id=user["id"], slug=slug,
+            fecha_creacion=ahora_cuba(), fecha_actualizacion=ahora_cuba(),
+            activo=True, aprobado=False,
         )
-        db.commit()
-        
-        # Crear suscripcion de prueba
         db.suscripcion.insert(
-            negocio_id=negocio_id,
-            usuario_id=user["id"],
+            negocio_id=negocio_id, usuario_id=user["id"],
             fecha_inicio=ahora_cuba().date(),
             fecha_fin=(ahora_cuba() + timedelta(days=settings.DIAS_PRUEBA_GRATIS)).date(),
-            estado="prueba",
-            metodo_pago="prueba",
-            monto_pagado=0,
-            dias_prueba=settings.DIAS_PRUEBA_GRATIS,
+            estado="prueba", metodo_pago="prueba",
+            monto_pagado=0, dias_prueba=settings.DIAS_PRUEBA_GRATIS,
             fecha_creacion=ahora_cuba(),
         )
         db.commit()
-        
-        return redirect(URL("catalogo_cuba/admin"))
-    
+        redirect(URL("catalogo_cuba", "admin"))
+
+    campos_disponibles = list(form.custom.widgets.keys())
     return dict(
-        **contexto_base(),
-        form=form,
+        form=form, modo="crear",
+        campos_disponibles=campos_disponibles,
         titulo="Crear mi negocio",
-        modo="crear",
     )
 
-@action("catalogo_cuba/admin/negocio/editar")
-@action.uses(auth, session, db, "admin_negocio_form.html")
+
+@action("catalogo_cuba/admin/negocio/editar", method=["GET", "POST"])
+@action.uses(AccionBase, "admin_negocio_form.html")
 def admin_negocio_editar():
-    """Editar negocio del comerciante."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        return redirect(URL("catalogo_cuba/admin/negocio/nuevo"))
-    
-    form = Form(
-        db.negocio,
-        record=negocio,
-        fields=[
-            "nombre", "descripcion", "logo", "direccion", "telefono",
-            "email", "whatsapp", "horario", "provincia", "municipio",
-            "color_tema", "moneda_principal", "mostrar_precios",
-            "facebook", "instagram", "telegram", "meta_descripcion",
-        ],
-        deletable=False,
-        formstyle=FormStyleDefault,
-    )
-    
+        redirect(URL("catalogo_cuba", "admin", "negocio", "nuevo"))
+
+    campos = [
+        "nombre", "descripcion", "logo", "direccion", "telefono",
+        "email", "whatsapp", "horario", "provincia", "municipio",
+        "color_tema", "moneda_principal", "mostrar_precios",
+        "facebook", "instagram", "telegram", "meta_descripcion",
+    ]
+    form = Form(db.negocio, record=negocio, fields=campos,
+                deletable=False, formstyle=FormStyleBulma)
+
     if form.accepted:
         db(db.negocio.id == negocio.id).update(
             fecha_actualizacion=ahora_cuba(),
             slug=slugify(form.vars.get("nombre", negocio.nombre)),
         )
         db.commit()
-        return redirect(URL("catalogo_cuba/admin"))
-    
+        redirect(URL("catalogo_cuba", "admin"))
+
+    campos_disponibles = list(form.custom.widgets.keys())
     return dict(
-        **contexto_base(),
-        form=form,
-        negocio=negocio,
+        form=form, negocio=negocio, modo="editar",
+        campos_disponibles=campos_disponibles,
         titulo="Editar mi negocio",
-        modo="editar",
     )
 
+
 # ============================================================
-# CRUD PRODUCTOS (COMERCIANTE)
+# CRUD PRODUCTOS
 # ============================================================
 
 @action("catalogo_cuba/admin/productos")
-@action.uses(auth, session, db, "admin_productos.html")
+@action.uses(AccionBase, "admin_productos.html")
 def admin_productos():
-    """Listado de productos del comerciante."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        return redirect(URL("catalogo_cuba/admin/negocio/nuevo"))
-    
-    # Paginacion
-    pagina = int(request.params.get("pagina", 1))
-    filtro_categoria = request.params.get("categoria", "")
-    filtro_nombre = request.params.get("q", "")
-    
+        redirect(URL("catalogo_cuba", "admin", "negocio", "nuevo"))
+
+    pagina = int(request.query.get("pagina", 1) or 1)
+    filtro_categoria = request.query.get("categoria", "")
+    filtro_nombre = request.query.get("q", "")
+    por_pagina = 20
+
     query = db.producto.negocio_id == negocio.id
     if filtro_categoria:
         query &= db.producto.categoria_id == int(filtro_categoria)
     if filtro_nombre:
         query &= db.producto.nombre.contains(filtro_nombre, case_sensitive=False)
-    
-    resultado = paginar(query, pagina)
-    
-    # Categorias para filtro
-    categorias = db(db.categoria.negocio_id == negocio.id)(db.categoria.activa == True).select(
-        orderby=db.categoria.orden
-    )
-    
+
+    total = db(query).count()
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    offset = (pagina - 1) * por_pagina
+    productos_raw = db(query).select(orderby=~db.producto.fecha_creacion,
+                                     limitby=(offset, offset + por_pagina))
+
+    categorias_raw = db(
+        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+    ).select(orderby=db.categoria.orden)
+    categorias = [{'id': c.id, 'nombre': c.nombre} for c in categorias_raw]
+    categorias_por_id = {c['id']: c['nombre'] for c in categorias}
+
+    productos = []
+    for p in productos_raw:
+        d = _preparar_producto(p, negocio)
+        d['categoria_nombre'] = categorias_por_id.get(p.categoria_id)
+        productos.append(d)
+
     return dict(
-        **contexto_base(),
-        negocio=negocio,
-        productos=resultado["registros"],
-        total=resultado["total"],
-        pagina=resultado["pagina"],
-        total_paginas=resultado["total_paginas"],
-        categorias=categorias,
-        filtro_categoria=filtro_categoria,
-        filtro_nombre=filtro_nombre,
+        total=total, productos=productos, categorias=categorias,
+        filtro_nombre=filtro_nombre, filtro_categoria=filtro_categoria,
+        pagina=pagina, total_paginas=total_paginas,
+        negocio={'slug': negocio.slug},
         titulo="Mis productos",
     )
 
-@action("catalogo_cuba/admin/producto/nuevo")
-@action.uses(auth, session, db, "admin_producto_form.html")
+
+@action("catalogo_cuba/admin/producto/nuevo", method=["GET", "POST"])
+@action.uses(AccionBase, "admin_producto_form.html")
 def admin_producto_nuevo():
-    """Crear nuevo producto."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        return redirect(URL("catalogo_cuba/admin"))
-    
-    # Solo categorias del negocio
+        redirect(URL("catalogo_cuba", "admin"))
+
     db.producto.categoria_id.requires = IS_EMPTY_OR(
         IS_IN_DB(db(db.categoria.negocio_id == negocio.id), "categoria.id", "%(nombre)s")
-    )
-    db.producto.negocio_id.default = negocio.id
-    db.producto.negocio_id.writable = False
-    db.producto.negocio_id.readable = False
-    
-    form = Form(
-        db.producto,
-        fields=[
-            "nombre", "descripcion", "descripcion_corta", "precio",
-            "precio_anterior", "moneda", "disponible", "en_oferta",
-            "stock", "sku", "categoria_id", "imagen_principal",
-            "destacado", "tags", "peso", "meta_keywords",
-        ],
-        deletable=False,
-        formstyle=FormStyleDefault,
-    )
-    
-    if form.accepted:
-        producto_id = form.vars.get("id")
-        nombre = form.vars.get("nombre", "")
-        slug = slugify(nombre)
-        
-        # Verificar unicidad del slug dentro del negocio
-        contador = 1
-        slug_original = slug
-        while db(db.producto.negocio_id == negocio.id)(db.producto.slug == slug).count() > 0:
-            slug = f"{slug_original}-{contador}"
-            contador += 1
-        
-        # Manejar upload de imagen
-        imagen = None
-        if "imagen_principal" in request.files:
-            archivo = request.files["imagen_principal"].file
-            imagen = guardar_imagen(archivo, f"productos/{negocio.id}")
-        
-        db(db.producto.id == producto_id).update(
-            slug=slug,
-            negocio_id=negocio.id,
-            imagen_principal=imagen,
-            fecha_creacion=ahora_cuba(),
-            fecha_actualizacion=ahora_cuba(),
-        )
-        db.commit()
-        
-        return redirect(URL("catalogo_cuba/admin/productos"))
-    
-    return dict(
-        **contexto_base(),
-        form=form,
-        negocio=negocio,
-        titulo="Nuevo producto",
-        modo="crear",
     )
 
-@action("catalogo_cuba/admin/producto/editar/<producto_id:int>")
-@action.uses(auth, session, db, "admin_producto_form.html")
+    campos = [
+        "nombre", "descripcion", "descripcion_corta", "precio",
+        "precio_anterior", "moneda", "disponible", "en_oferta",
+        "stock", "sku", "categoria_id", "imagen_principal",
+        "destacado", "tags", "peso", "meta_keywords",
+    ]
+    form = Form(db.producto, fields=campos, deletable=False, formstyle=FormStyleBulma)
+
+    if form.accepted:
+        producto_id = form.vars.get("id")
+        slug = slugify(form.vars.get("nombre", ""))
+        contador = 1
+        original = slug
+        while db((db.producto.negocio_id == negocio.id) & (db.producto.slug == slug)).count() > 0:
+            slug = "%s-%d" % (original, contador)
+            contador += 1
+
+        imagen = None
+        archivo = request.files.get("imagen_principal")
+        if archivo and archivo.file:
+            imagen = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
+
+        db(db.producto.id == producto_id).update(
+            slug=slug, negocio_id=negocio.id, imagen_principal=imagen,
+            fecha_creacion=ahora_cuba(), fecha_actualizacion=ahora_cuba(),
+        )
+        db.commit()
+        redirect(URL("catalogo_cuba", "admin", "productos"))
+
+    return dict(form=form, negocio=negocio, modo="crear",
+                titulo="Nuevo producto")
+
+
+@action("catalogo_cuba/admin/producto/editar/<producto_id:int>", method=["GET", "POST"])
+@action.uses(AccionBase, "admin_producto_form.html")
 def admin_producto_editar(producto_id):
-    """Editar producto existente."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
         raise HTTP(403)
-    
-    producto = db(db.producto.id == producto_id)(
-        db.producto.negocio_id == negocio.id).select().first()
-    
+
+    producto = db(
+        (db.producto.id == producto_id) & (db.producto.negocio_id == negocio.id)
+    ).select().first()
     if not producto:
         raise HTTP(404)
-    
-    # Solo categorias del negocio
+
     db.producto.categoria_id.requires = IS_EMPTY_OR(
         IS_IN_DB(db(db.categoria.negocio_id == negocio.id), "categoria.id", "%(nombre)s")
     )
-    
-    form = Form(
-        db.producto,
-        record=producto,
-        fields=[
-            "nombre", "descripcion", "descripcion_corta", "precio",
-            "precio_anterior", "moneda", "disponible", "en_oferta",
-            "stock", "sku", "categoria_id", "imagen_principal",
-            "destacado", "tags", "peso", "meta_keywords",
-        ],
-        deletable=True,
-        formstyle=FormStyleDefault,
-    )
-    
+
+    campos = [
+        "nombre", "descripcion", "descripcion_corta", "precio",
+        "precio_anterior", "moneda", "disponible", "en_oferta",
+        "stock", "sku", "categoria_id", "imagen_principal",
+        "destacado", "tags", "peso", "meta_keywords",
+    ]
+    form = Form(db.producto, record=producto, fields=campos,
+                deletable=True, formstyle=FormStyleBulma)
+
     if form.accepted:
-        # Manejar upload de imagen nueva
         imagen = producto.imagen_principal
-        if "imagen_principal" in request.files and request.files["imagen_principal"].file:
-            archivo = request.files["imagen_principal"].file
-            nueva_imagen = guardar_imagen(archivo, f"productos/{negocio.id}")
-            if nueva_imagen:
-                imagen = nueva_imagen
-        
+        archivo = request.files.get("imagen_principal")
+        if archivo and archivo.file:
+            nueva = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
+            if nueva:
+                imagen = nueva
+
         db(db.producto.id == producto_id).update(
             slug=slugify(form.vars.get("nombre", producto.nombre)),
             imagen_principal=imagen,
             fecha_actualizacion=ahora_cuba(),
         )
         db.commit()
-        return redirect(URL("catalogo_cuba/admin/productos"))
-    
-    return dict(
-        **contexto_base(),
-        form=form,
-        negocio=negocio,
-        producto=producto,
-        titulo=f"Editar: {producto.nombre}",
-        modo="editar",
-    )
+        redirect(URL("catalogo_cuba", "admin", "productos"))
+
+    return dict(form=form, negocio=negocio, producto=producto,
+                modo="editar", titulo="Editar: %s" % producto.nombre)
+
 
 # ============================================================
-# CRUD CATEGORIAS (COMERCIANTE)
+# CRUD CATEGORIAS
 # ============================================================
 
 @action("catalogo_cuba/admin/categorias")
-@action.uses(auth, session, db, "admin_categorias.html")
+@action.uses(AccionBase, "admin_categorias.html")
 def admin_categorias():
-    """Listado de categorias del comerciante."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
-    if not negocio:
-        return redirect(URL("catalogo_cuba/admin"))
-    
-    categorias = db(db.categoria.negocio_id == negocio.id).select(
-        orderby=db.categoria.orden
-    )
-    
-    return dict(
-        **contexto_base(),
-        negocio=negocio,
-        categorias=categorias,
-        titulo="Mis categorias",
-    )
 
-@action("catalogo_cuba/admin/categoria/nueva")
-@action.uses(auth, session, db, "admin_categoria_form.html")
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        redirect(URL("catalogo_cuba", "admin"))
+
+    categorias_raw = db(db.categoria.negocio_id == negocio.id).select(orderby=db.categoria.orden)
+
+    # Conteo de productos por categoria en una sola query
+    conteo = {}
+    if categorias_raw:
+        rows = db(db.producto.categoria_id.belongs([c.id for c in categorias_raw])).select(
+            db.producto.categoria_id, db.producto.id.count(),
+            groupby=db.producto.categoria_id,
+        )
+        conteo = {r.producto.categoria_id: r[db.producto.id.count()] for r in rows}
+
+    categorias = [{
+        'id': c.id, 'nombre': c.nombre, 'descripcion': c.descripcion,
+        'orden': c.orden or 0, 'activa': c.activa,
+        'cantidad_productos': conteo.get(c.id, 0),
+    } for c in categorias_raw]
+
+    return dict(negocio=negocio, categorias=categorias, titulo="Mis categorias")
+
+
+@action("catalogo_cuba/admin/categoria/nueva", method=["GET", "POST"])
+@action.uses(AccionBase, "admin_categoria_form.html")
 def admin_categoria_nueva():
-    """Crear nueva categoria."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        return redirect(URL("catalogo_cuba/admin"))
-    
-    db.categoria.negocio_id.default = negocio.id
-    db.categoria.negocio_id.writable = False
-    db.categoria.negocio_id.readable = False
-    
-    form = Form(
-        db.categoria,
-        fields=["nombre", "descripcion", "imagen", "orden", "activa"],
-        deletable=False,
-        formstyle=FormStyleDefault,
-    )
-    
+        redirect(URL("catalogo_cuba", "admin"))
+
+    form = Form(db.categoria,
+                fields=["nombre", "descripcion", "imagen", "orden", "activa"],
+                deletable=False, formstyle=FormStyleBulma)
+
     if form.accepted:
         cat_id = form.vars.get("id")
-        nombre = form.vars.get("nombre", "")
         db(db.categoria.id == cat_id).update(
-            slug=slugify(nombre),
+            slug=slugify(form.vars.get("nombre", "")),
             negocio_id=negocio.id,
             fecha_creacion=ahora_cuba(),
         )
         db.commit()
-        return redirect(URL("catalogo_cuba/admin/categorias"))
-    
-    return dict(
-        **contexto_base(),
-        form=form,
-        negocio=negocio,
-        titulo="Nueva categoria",
-        modo="crear",
-    )
+        redirect(URL("catalogo_cuba", "admin", "categorias"))
 
-@action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>")
-@action.uses(auth, session, db, "admin_categoria_form.html")
+    return dict(form=form, negocio=negocio, modo="crear",
+                titulo="Nueva categoria")
+
+
+@action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
+@action.uses(AccionBase, "admin_categoria_form.html")
 def admin_categoria_editar(categoria_id):
-    """Editar categoria."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
         raise HTTP(403)
-    
-    categoria = db(db.categoria.id == categoria_id)(
-        db.categoria.negocio_id == negocio.id).select().first()
-    
+
+    categoria = db(
+        (db.categoria.id == categoria_id) & (db.categoria.negocio_id == negocio.id)
+    ).select().first()
     if not categoria:
         raise HTTP(404)
-    
-    form = Form(
-        db.categoria,
-        record=categoria,
-        fields=["nombre", "descripcion", "imagen", "orden", "activa"],
-        deletable=True,
-        formstyle=FormStyleDefault,
-    )
-    
+
+    form = Form(db.categoria, record=categoria,
+                fields=["nombre", "descripcion", "imagen", "orden", "activa"],
+                deletable=True, formstyle=FormStyleBulma)
+
     if form.accepted:
         if not form.deleted:
             db(db.categoria.id == categoria_id).update(
                 slug=slugify(form.vars.get("nombre", categoria.nombre)),
             )
             db.commit()
-        return redirect(URL("catalogo_cuba/admin/categorias"))
-    
-    return dict(
-        **contexto_base(),
-        form=form,
-        negocio=negocio,
-        categoria=categoria,
-        titulo=f"Editar: {categoria.nombre}",
-        modo="editar",
-    )
+        redirect(URL("catalogo_cuba", "admin", "categorias"))
+
+    return dict(form=form, negocio=negocio, categoria=categoria,
+                modo="editar", titulo="Editar: %s" % categoria.nombre)
+
 
 # ============================================================
-# INVENTARIO (COMERCIANTE)
+# INVENTARIO
 # ============================================================
 
 @action("catalogo_cuba/admin/inventario")
-@action.uses(auth, session, db, "admin_inventario.html")
+@action.uses(AccionBase, "admin_inventario.html")
 def admin_inventario():
-    """Panel de inventario del comerciante."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        return redirect(URL("catalogo_cuba/admin"))
-    
-    # Productos ordenados por stock (los de menor stock primero)
-    productos = db(db.producto.negocio_id == negocio.id).select(
-        orderby=db.producto.stock
-    )
-    
-    # Estadisticas
-    total_productos = len(productos)
-    productos_agotados = sum(1 for p in productos if p.stock == 0)
-    bajo_stock = sum(1 for p in productos if 0 < p.stock <= 5)
-    
+        redirect(URL("catalogo_cuba", "admin"))
+
+    productos_raw = db(db.producto.negocio_id == negocio.id).select(orderby=db.producto.stock)
+
+    productos = []
+    agotados = 0
+    bajos = 0
+    for p in productos_raw:
+        stock = p.stock or 0
+        if stock <= 0:
+            clase, estilo = 'fila-agotado', 'background:rgba(254,226,226,.3)'
+            agotados += 1
+        elif stock <= 5:
+            clase, estilo = 'fila-bajo', 'background:rgba(254,243,199,.3)'
+            bajos += 1
+        else:
+            clase, estilo = '', ''
+
+        productos.append({
+            'id': p.id, 'nombre': p.nombre, 'sku': p.sku,
+            'stock': stock, 'imagen_principal': p.imagen_principal,
+            'clase_fila': clase, 'estilo_fila': estilo,
+        })
+
     return dict(
-        **contexto_base(),
-        negocio=negocio,
-        productos=productos,
-        total_productos=total_productos,
-        productos_agotados=productos_agotados,
-        bajo_stock=bajo_stock,
+        negocio=negocio, productos=productos,
+        total_productos=len(productos),
+        productos_agotados=agotados,
+        bajo_stock=bajos,
         titulo="Inventario",
     )
 
+
 @action("catalogo_cuba/api/inventario/actualizar", method=["POST"])
-@action.uses(auth, session, db)
+@action.uses(db, session, auth.user, contexto_base)
 def api_actualizar_stock():
-    """API para actualizar stock de un producto (AJAX)."""
     user = auth.get_user()
     if not user or not es_comerciante():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
+
     try:
-        data = request.json
+        data = request.json or {}
         producto_id = data.get("producto_id")
         nuevo_stock = data.get("stock")
-        
-        negocio = obtener_negocio_del_usuario()
+
+        negocio = db(db.negocio.usuario_id == user["id"]).select().first()
         if not negocio:
             return respuesta_json(exito=False, mensaje="Negocio no encontrado")
-        
-        producto = db(db.producto.id == producto_id)(
-            db.producto.negocio_id == negocio.id).select().first()
-        
+
+        producto = db(
+            (db.producto.id == producto_id) & (db.producto.negocio_id == negocio.id)
+        ).select().first()
         if not producto:
             return respuesta_json(exito=False, mensaje="Producto no encontrado")
-        
+
         db(db.producto.id == producto_id).update(
-            stock=int(nuevo_stock),
-            fecha_actualizacion=ahora_cuba(),
+            stock=int(nuevo_stock), fecha_actualizacion=ahora_cuba(),
         )
         db.commit()
-        
         return respuesta_json(exito=True, mensaje="Stock actualizado")
-    
     except Exception as e:
-        return respuesta_json(exito=False, mensaje=f"Error: {str(e)}")
+        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+
 
 # ============================================================
-# SUSCRIPCIONES Y PAGOS (COMERCIANTE)
+# SUSCRIPCION Y PAGOS (COMERCIANTE)
 # ============================================================
 
 @action("catalogo_cuba/admin/suscripcion")
-@action.uses(auth, session, db, "admin_suscripcion.html")
+@action.uses(AccionBase, "admin_suscripcion.html")
 def admin_suscripcion():
-    """Panel de suscripcion del comerciante."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        return redirect(URL("catalogo_cuba/admin"))
-    
-    # Suscripcion actual
-    suscripcion_actual = db(db.suscripcion.negocio_id == negocio.id).select(
-        orderby=~db.suscripcion.fecha_creacion,
-        limitby=(0, 1)
+        redirect(URL("catalogo_cuba", "admin"))
+
+    suscripcion_raw = db(db.suscripcion.negocio_id == negocio.id).select(
+        orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)
     ).first()
-    
-    # Historial de pagos
-    pagos = db(db.pago.negocio_id == negocio.id).select(
+    suscripcion = _preparar_suscripcion(suscripcion_raw)
+
+    pagos_raw = db(db.pago.negocio_id == negocio.id).select(
         orderby=~db.pago.fecha_solicitud
     )
-    
+    pagos = [_preparar_pago(p) for p in pagos_raw]
+
+    mostrar_renovacion = (not suscripcion) or suscripcion['necesita_renovacion']
+
     return dict(
-        **contexto_base(),
-        negocio=negocio,
-        suscripcion=suscripcion_actual,
-        pagos=pagos,
+        negocio=negocio, suscripcion=suscripcion, pagos=pagos,
+        mostrar_renovacion=mostrar_renovacion,
         costo_cup=settings.COSTO_SUSCRIPCION_MENSUAL_CUP,
         costo_usdt=settings.COSTO_SUSCRIPCION_MENSUAL_USDT,
         titulo="Mi suscripcion",
     )
 
+
 @action("catalogo_cuba/admin/pago/realizar", method=["POST"])
-@action.uses(auth, session, db)
+@action.uses(db, session, auth.user, contexto_base)
 def admin_realizar_pago():
-    """Registrar un nuevo pago."""
     user = auth.get_user()
     if not user or not es_comerciante():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
+
     try:
-        negocio = obtener_negocio_del_usuario()
+        negocio = db(db.negocio.usuario_id == user["id"]).select().first()
         if not negocio:
             return respuesta_json(exito=False, mensaje="Negocio no encontrado")
-        
-        metodo = request.POST.get("metodo_pago")
-        monto = request.POST.get("monto")
-        moneda = request.POST.get("moneda", "CUP")
-        referencia = request.POST.get("referencia", "")
-        
-        # Obtener o crear suscripcion
-        suscripcion = db(db.suscripcion.negocio_id == negocio.id)(
-            db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])).select(
-            orderby=~db.suscripcion.fecha_creacion,
-            limitby=(0, 1)
-        ).first()
-        
+
+        metodo = request.forms.get("metodo_pago")
+        monto = request.forms.get("monto")
+        moneda = request.forms.get("moneda", "CUP")
+        referencia = request.forms.get("referencia", "")
+
+        suscripcion = db(
+            (db.suscripcion.negocio_id == negocio.id) &
+            db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])
+        ).select(orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)).first()
+
         if not suscripcion:
-            # Crear nueva suscripcion
             suscripcion_id = db.suscripcion.insert(
-                negocio_id=negocio.id,
-                usuario_id=user["id"],
+                negocio_id=negocio.id, usuario_id=user["id"],
                 fecha_inicio=ahora_cuba().date(),
                 fecha_fin=(ahora_cuba() + timedelta(days=30)).date(),
-                estado="pendiente",
-                metodo_pago=metodo,
+                estado="pendiente", metodo_pago=metodo,
                 fecha_creacion=ahora_cuba(),
             )
         else:
             suscripcion_id = suscripcion.id
-            # Actualizar estado
             db(db.suscripcion.id == suscripcion_id).update(
-                estado="pendiente",
-                metodo_pago=metodo,
+                estado="pendiente", metodo_pago=metodo,
             )
-        
         db.commit()
-        
-        # Crear registro de pago
+
         pago_id = db.pago.insert(
-            suscripcion_id=suscripcion_id,
-            negocio_id=negocio.id,
-            usuario_id=user["id"],
-            monto=float(monto),
-            moneda=moneda,
-            metodo_pago=metodo,
-            estado="pendiente",
-            referencia=referencia,
+            suscripcion_id=suscripcion_id, negocio_id=negocio.id,
+            usuario_id=user["id"], monto=float(monto), moneda=moneda,
+            metodo_pago=metodo, estado="pendiente", referencia=referencia,
             fecha_solicitud=ahora_cuba(),
         )
         db.commit()
-        
-        return respuesta_json(exito=True, mensaje="Pago registrado correctamente. Pendiente de validacion.",
-                            datos={"pago_id": pago_id})
-    
+
+        return respuesta_json(exito=True,
+                              mensaje="Pago registrado correctamente. Pendiente de validacion.",
+                              datos={"pago_id": pago_id})
     except Exception as e:
-        return respuesta_json(exito=False, mensaje=f"Error: {str(e)}")
+        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+
 
 # ============================================================
 # ESTADISTICAS (COMERCIANTE)
 # ============================================================
 
 @action("catalogo_cuba/admin/estadisticas")
-@action.uses(auth, session, db, "admin_estadisticas.html")
+@action.uses(AccionBase, "admin_estadisticas.html")
 def admin_estadisticas():
-    """Estadisticas del negocio."""
     user = auth.get_user()
     if not user or not es_comerciante():
         raise HTTP(403)
-    
-    negocio = obtener_negocio_del_usuario()
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
     if not negocio:
-        return redirect(URL("catalogo_cuba/admin"))
-    
-    # Datos para graficos
-    # Visitas por dia (ultimos 30 dias)
+        redirect(URL("catalogo_cuba", "admin"))
+
     desde = ahora_cuba() - timedelta(days=30)
-    visitas = db(db.visita.negocio_id == negocio.id)(
-        db.visita.fecha >= desde).select(orderby=db.visita.fecha)
-    
-    # Productos mas vistos
-    top_productos = db(db.producto.negocio_id == negocio.id).select(
-        orderby=~db.producto.vistas,
-        limitby=(0, 10)
+    visitas_raw = db(
+        (db.visita.negocio_id == negocio.id) & (db.visita.fecha >= desde)
+    ).select(orderby=db.visita.fecha)
+
+    # Precarga de productos para evitar N+1
+    producto_ids = list({v.producto_id for v in visitas_raw if v.producto_id})
+    productos_por_id = {}
+    if producto_ids:
+        prods = db(db.producto.id.belongs(producto_ids)).select(db.producto.id, db.producto.nombre)
+        productos_por_id = {p.id: p.nombre for p in prods}
+
+    visitas = [{
+        'fecha_texto': v.fecha.strftime('%d/%m/%Y %H:%M') if v.fecha else '-',
+        'ip': v.ip,
+        'producto_nombre': productos_por_id.get(v.producto_id),
+    } for v in visitas_raw[-50:]]
+
+    top_raw = db(db.producto.negocio_id == negocio.id).select(
+        orderby=~db.producto.vistas, limitby=(0, 10)
     )
-    
-    # Totales
+    top_productos = [_preparar_producto(p, negocio) for p in top_raw]
+
     total_visitas = db(db.visita.negocio_id == negocio.id).count()
     total_productos = db(db.producto.negocio_id == negocio.id).count()
-    
+
     return dict(
-        **contexto_base(),
-        negocio=negocio,
-        visitas=visitas,
-        top_productos=top_productos,
-        total_visitas=total_visitas,
-        total_productos=total_productos,
+        negocio=negocio, visitas=visitas, top_productos=top_productos,
+        total_visitas=total_visitas, total_productos=total_productos,
         titulo="Estadisticas",
     )
+
 
 # ============================================================
 # PANEL SUPERADMIN
 # ============================================================
 
 @action("catalogo_cuba/superadmin")
-@action.uses(auth, session, db, "superadmin_dashboard.html")
+@action.uses(AccionBase, "superadmin_dashboard.html")
 def superadmin_dashboard():
-    """Dashboard del superadministrador."""
     if not es_superadmin():
-        raise HTTP(403, "Acceso restringido a superadministradores")
-    
-    # Estadisticas generales
+        raise HTTP(403, "Acceso restringido")
+
     total_negocios = db(db.negocio.id > 0).count()
-    negocios_activos = db(db.negocio.activo == True)(db.negocio.aprobado == True).count()
+    negocios_activos = db((db.negocio.activo == True) & (db.negocio.aprobado == True)).count()
     negocios_pendientes = db(db.negocio.aprobado == False).count()
     total_usuarios = db(db.auth_user.id > 0).count()
     total_productos = db(db.producto.id > 0).count()
-    
-    # Suscripciones
     suscripciones_activas = db(db.suscripcion.estado == "activa").count()
     suscripciones_vencidas = db(db.suscripcion.estado == "vencida").count()
     suscripciones_prueba = db(db.suscripcion.estado == "prueba").count()
-    
-    # Pagos pendientes
     pagos_pendientes = db(db.pago.estado == "pendiente").count()
-    
-    # Negocios recientes
-    negocios_recientes = db(db.negocio.id > 0).select(
-        orderby=~db.negocio.fecha_creacion,
-        limitby=(0, 10)
+
+    negocios_raw = db(db.negocio.id > 0).select(
+        orderby=~db.negocio.fecha_creacion, limitby=(0, 10)
     )
-    
+
+    usuario_ids = [n.usuario_id for n in negocios_raw if n.usuario_id]
+    emails = {}
+    if usuario_ids:
+        usuarios = db(db.auth_user.id.belongs(usuario_ids)).select()
+        emails = {u.id: u.email for u in usuarios}
+
+    negocios_recientes = []
+    for n in negocios_raw:
+        if n.aprobado and n.activo:
+            texto, clase = 'Activo', 'badge-green'
+        elif not n.aprobado:
+            texto, clase = 'Pendiente', 'badge-yellow'
+        else:
+            texto, clase = 'Inactivo', 'badge-red'
+
+        negocios_recientes.append({
+            'id': n.id, 'nombre': n.nombre, 'slug': n.slug, 'logo': n.logo,
+            'provincia': n.provincia,
+            'propietario_email': emails.get(n.usuario_id, '-'),
+            'badge_estado_texto': texto, 'badge_estado_clase': clase,
+            'fecha_creacion_texto': n.fecha_creacion.strftime('%d/%m/%Y') if n.fecha_creacion else '-',
+        })
+
     return dict(
-        **contexto_base(),
         total_negocios=total_negocios,
         negocios_activos=negocios_activos,
         negocios_pendientes=negocios_pendientes,
@@ -1119,365 +1168,470 @@ def superadmin_dashboard():
         titulo="Panel de Administracion",
     )
 
+
 # ============================================================
 # GESTION DE NEGOCIOS (SUPERADMIN)
 # ============================================================
 
 @action("catalogo_cuba/superadmin/negocios")
-@action.uses(auth, session, db, "superadmin_negocios.html")
+@action.uses(AccionBase, "superadmin_negocios.html")
 def superadmin_negocios():
-    """Listado de todos los negocios."""
     if not es_superadmin():
         raise HTTP(403)
-    
-    pagina = int(request.params.get("pagina", 1))
-    estado = request.params.get("estado", "")
-    
+
+    pagina = int(request.query.get("pagina", 1) or 1)
+    estado = request.query.get("estado", "")
+    por_pagina = 20
+
     query = db.negocio.id > 0
     if estado == "activos":
-        query = (db.negocio.activo == True) & (db.negocio.aprobado == True)
+        query &= (db.negocio.activo == True) & (db.negocio.aprobado == True)
     elif estado == "pendientes":
-        query = db.negocio.aprobado == False
+        query &= db.negocio.aprobado == False
     elif estado == "inactivos":
-        query = db.negocio.activo == False
-    
-    resultado = paginar(query, pagina, page_size=20)
-    
+        query &= db.negocio.activo == False
+
+    total = db(query).count()
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    offset = (pagina - 1) * por_pagina
+    negocios_raw = db(query).select(orderby=~db.negocio.fecha_creacion,
+                                    limitby=(offset, offset + por_pagina))
+
+    negocio_ids = [n.id for n in negocios_raw]
+    usuario_ids = [n.usuario_id for n in negocios_raw if n.usuario_id]
+
+    emails = {}
+    if usuario_ids:
+        usuarios = db(db.auth_user.id.belongs(usuario_ids)).select()
+        emails = {u.id: u.email for u in usuarios}
+
+    conteo_prod = {}
+    if negocio_ids:
+        rows = db(db.producto.negocio_id.belongs(negocio_ids)).select(
+            db.producto.negocio_id, db.producto.id.count(),
+            groupby=db.producto.negocio_id,
+        )
+        conteo_prod = {r.producto.negocio_id: r[db.producto.id.count()] for r in rows}
+
+    subs = {}
+    if negocio_ids:
+        subs_raw = db(db.suscripcion.negocio_id.belongs(negocio_ids)).select(
+            orderby=~db.suscripcion.fecha_creacion
+        )
+        for s in subs_raw:
+            if s.negocio_id not in subs:
+                subs[s.negocio_id] = s
+
+    estados_sus = {
+        'activa':  ('badge-green', 'Activa'),
+        'prueba':  ('badge-blue',  'Prueba'),
+        'vencida': ('badge-red',   'Vencida'),
+    }
+
+    negocios = []
+    for n in negocios_raw:
+        if n.aprobado and n.activo:
+            texto, clase = 'Activo', 'badge-green'
+        elif not n.aprobado:
+            texto, clase = 'Pendiente', 'badge-yellow'
+        else:
+            texto, clase = 'Inactivo', 'badge-red'
+
+        s = subs.get(n.id)
+        if s:
+            stext, sclase = estados_sus.get(s.estado, ('badge-yellow', s.estado))
+        else:
+            stext, sclase = None, None
+
+        negocios.append({
+            'id': n.id, 'nombre': n.nombre, 'slug': n.slug, 'logo': n.logo,
+            'telefono': n.telefono, 'provincia': n.provincia,
+            'aprobado': n.aprobado, 'activo': n.activo,
+            'propietario_email': emails.get(n.usuario_id, '-'),
+            'cantidad_productos': conteo_prod.get(n.id, 0),
+            'badge_negocio_texto': texto, 'badge_negocio_clase': clase,
+            'suscripcion_estado_texto': stext, 'suscripcion_estado_clase': sclase,
+        })
+
     return dict(
-        **contexto_base(),
-        negocios=resultado["registros"],
-        total=resultado["total"],
-        pagina=resultado["pagina"],
-        total_paginas=resultado["total_paginas"],
-        estado_filtro=estado,
+        total=total, negocios=negocios, estado_filtro=estado,
+        pagina=pagina, total_paginas=total_paginas,
         titulo="Gestion de Negocios",
     )
 
+
 @action("catalogo_cuba/superadmin/negocio/aprobar/<negocio_id:int>", method=["POST"])
-@action.uses(auth, session, db)
+@action.uses(db, session, auth.user, contexto_base)
 def superadmin_aprobar_negocio(negocio_id):
-    """Aprobar un negocio pendiente."""
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
+
     negocio = db.negocio[negocio_id]
     if not negocio:
         return respuesta_json(exito=False, mensaje="Negocio no encontrado")
-    
+
     db(db.negocio.id == negocio_id).update(
-        aprobado=True,
-        activo=True,
-        fecha_actualizacion=ahora_cuba(),
+        aprobado=True, activo=True, fecha_actualizacion=ahora_cuba(),
     )
     db.commit()
-    
     return respuesta_json(exito=True, mensaje="Negocio aprobado correctamente")
 
+
 @action("catalogo_cuba/superadmin/negocio/toggle/<negocio_id:int>", method=["POST"])
-@action.uses(auth, session, db)
+@action.uses(db, session, auth.user, contexto_base)
 def superadmin_toggle_negocio(negocio_id):
-    """Activar/desactivar un negocio."""
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
+
     negocio = db.negocio[negocio_id]
     if not negocio:
         return respuesta_json(exito=False, mensaje="Negocio no encontrado")
-    
+
     nuevo_estado = not negocio.activo
     db(db.negocio.id == negocio_id).update(
-        activo=nuevo_estado,
-        fecha_actualizacion=ahora_cuba(),
+        activo=nuevo_estado, fecha_actualizacion=ahora_cuba(),
     )
     db.commit()
-    
-    return respuesta_json(exito=True, mensaje=f"Negocio {'activado' if nuevo_estado else 'desactivado'}")
+    return respuesta_json(exito=True,
+                          mensaje="Negocio %s" % ('activado' if nuevo_estado else 'desactivado'))
+
 
 # ============================================================
 # GESTION DE USUARIOS (SUPERADMIN)
 # ============================================================
 
 @action("catalogo_cuba/superadmin/usuarios")
-@action.uses(auth, session, db, "superadmin_usuarios.html")
+@action.uses(AccionBase, "superadmin_usuarios.html")
 def superadmin_usuarios():
-    """Listado de usuarios."""
     if not es_superadmin():
         raise HTTP(403)
-    
-    pagina = int(request.params.get("pagina", 1))
-    rol = request.params.get("rol", "")
-    
+
+    pagina = int(request.query.get("pagina", 1) or 1)
+    rol = request.query.get("rol", "")
+    por_pagina = 25
+
     query = db.auth_user.id > 0
     if rol:
-        query = db.auth_user.rol == rol
-    
-    resultado = paginar(query, pagina, page_size=25)
-    
+        query &= db.auth_user.rol == rol
+
+    total = db(query).count()
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    offset = (pagina - 1) * por_pagina
+    usuarios_raw = db(query).select(orderby=~db.auth_user.fecha_registro,
+                                    limitby=(offset, offset + por_pagina))
+
+    usuario_ids = [u.id for u in usuarios_raw]
+    negocio_slug_por_usuario = {}
+    if usuario_ids:
+        negocios = db(db.negocio.usuario_id.belongs(usuario_ids)).select(
+            db.negocio.usuario_id, db.negocio.slug
+        )
+        for n in negocios:
+            negocio_slug_por_usuario.setdefault(n.usuario_id, n.slug)
+
+    usuarios = [{
+        'id': u.id, 'email': u.email,
+        'first_name': u.first_name, 'last_name': u.last_name,
+        'rol': u.rol or 'visitante',
+        'telefono': u.telefono,
+        'activo': u.activo if u.activo is not None else True,
+        'fecha_registro_texto': u.fecha_registro.strftime('%d/%m/%Y') if u.fecha_registro else '-',
+        'negocio_slug': negocio_slug_por_usuario.get(u.id),
+    } for u in usuarios_raw]
+
     return dict(
-        **contexto_base(),
-        usuarios=resultado["registros"],
-        total=resultado["total"],
-        pagina=resultado["pagina"],
-        total_paginas=resultado["total_paginas"],
-        rol_filtro=rol,
+        total=total, usuarios=usuarios, rol_filtro=rol,
+        pagina=pagina, total_paginas=total_paginas,
         titulo="Gestion de Usuarios",
     )
 
+
 @action("catalogo_cuba/superadmin/usuario/cambiar-rol/<usuario_id:int>", method=["POST"])
-@action.uses(auth, session, db)
+@action.uses(db, session, auth.user, contexto_base)
 def superadmin_cambiar_rol(usuario_id):
-    """Cambiar rol de un usuario."""
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
-    nuevo_rol = request.POST.get("rol", "")
+
+    nuevo_rol = request.forms.get("rol", "")
     if nuevo_rol not in ["superadmin", "comerciante", "visitante"]:
         return respuesta_json(exito=False, mensaje="Rol invalido")
-    
+
     usuario = db.auth_user[usuario_id]
     if not usuario:
         return respuesta_json(exito=False, mensaje="Usuario no encontrado")
-    
+
     db(db.auth_user.id == usuario_id).update(rol=nuevo_rol)
     db.commit()
-    
     return respuesta_json(exito=True, mensaje="Rol actualizado")
+
 
 # ============================================================
 # GESTION DE SUSCRIPCIONES (SUPERADMIN)
 # ============================================================
 
 @action("catalogo_cuba/superadmin/suscripciones")
-@action.uses(auth, session, db, "superadmin_suscripciones.html")
+@action.uses(AccionBase, "superadmin_suscripciones.html")
 def superadmin_suscripciones():
-    """Gestion de suscripciones."""
     if not es_superadmin():
         raise HTTP(403)
-    
-    pagina = int(request.params.get("pagina", 1))
-    estado = request.params.get("estado", "")
-    
+
+    pagina = int(request.query.get("pagina", 1) or 1)
+    estado = request.query.get("estado", "")
+    por_pagina = 20
+
     query = db.suscripcion.id > 0
     if estado:
-        query = db.suscripcion.estado == estado
-    
-    resultado = paginar(query, pagina, page_size=20)
-    
+        query &= db.suscripcion.estado == estado
+
+    total = db(query).count()
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    offset = (pagina - 1) * por_pagina
+    sus_raw = db(query).select(orderby=~db.suscripcion.fecha_creacion,
+                               limitby=(offset, offset + por_pagina))
+
+    negocio_ids = [s.negocio_id for s in sus_raw if s.negocio_id]
+    usuario_ids = [s.usuario_id for s in sus_raw if s.usuario_id]
+
+    negocios = {}
+    if negocio_ids:
+        for n in db(db.negocio.id.belongs(negocio_ids)).select():
+            negocios[n.id] = n.nombre
+    usuarios = {}
+    if usuario_ids:
+        for u in db(db.auth_user.id.belongs(usuario_ids)).select():
+            usuarios[u.id] = u.email
+
+    estados_badge = {
+        'activa':    ('badge-green',  'Activa'),
+        'prueba':    ('badge-blue',   'Prueba'),
+        'vencida':   ('badge-red',    'Vencida'),
+        'pendiente': ('badge-yellow', 'Pendiente'),
+    }
+    metodos = {
+        'transfermovil': '📱 Transfermovil',
+        'presencial':    '💵 Presencial',
+        'usdt':          '💎 USDT',
+        'prueba':        '🎁 Gratis',
+    }
+
+    suscripciones = []
+    for s in sus_raw:
+        clase, texto = estados_badge.get(s.estado, ('badge', s.estado))
+        suscripciones.append({
+            'id': s.id,
+            'nombre_negocio': negocios.get(s.negocio_id),
+            'email_usuario': usuarios.get(s.usuario_id),
+            'fecha_inicio_texto': s.fecha_inicio.strftime('%d/%m/%Y') if s.fecha_inicio else '-',
+            'fecha_fin_texto': s.fecha_fin.strftime('%d/%m/%Y') if s.fecha_fin else '-',
+            'estado_badge_texto': texto, 'estado_badge_clase': clase,
+            'metodo_pago_texto': metodos.get(s.metodo_pago, s.metodo_pago or '-'),
+            'monto_pagado_texto': '%.2f %s' % (s.monto_pagado or 0, s.moneda_pago or 'CUP'),
+        })
+
     return dict(
-        **contexto_base(),
-        suscripciones=resultado["registros"],
-        total=resultado["total"],
-        pagina=resultado["pagina"],
-        total_paginas=resultado["total_paginas"],
-        estado_filtro=estado,
+        total=total, suscripciones=suscripciones, estado_filtro=estado,
+        pagina=pagina, total_paginas=total_paginas,
         titulo="Gestion de Suscripciones",
     )
+
 
 # ============================================================
 # VALIDACION DE PAGOS (SUPERADMIN)
 # ============================================================
 
 @action("catalogo_cuba/superadmin/pagos")
-@action.uses(auth, session, db, "superadmin_pagos.html")
+@action.uses(AccionBase, "superadmin_pagos.html")
 def superadmin_pagos():
-    """Listado de pagos para validacion."""
     if not es_superadmin():
         raise HTTP(403)
-    
-    pagina = int(request.params.get("pagina", 1))
-    estado = request.params.get("estado", "pendiente")
-    
+
+    pagina = int(request.query.get("pagina", 1) or 1)
+    estado = request.query.get("estado", "pendiente")
+    por_pagina = 25
+
     query = db.pago.id > 0
     if estado:
-        query = db.pago.estado == estado
-    
-    resultado = paginar(query, pagina, page_size=25)
-    
+        query &= db.pago.estado == estado
+
+    total = db(query).count()
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    offset = (pagina - 1) * por_pagina
+    pagos_raw = db(query).select(orderby=~db.pago.fecha_solicitud,
+                                 limitby=(offset, offset + por_pagina))
+
+    negocio_ids = [p.negocio_id for p in pagos_raw if p.negocio_id]
+    usuario_ids = [p.usuario_id for p in pagos_raw if p.usuario_id]
+
+    negocios = {}
+    if negocio_ids:
+        for n in db(db.negocio.id.belongs(negocio_ids)).select():
+            negocios[n.id] = n.nombre
+    usuarios = {}
+    if usuario_ids:
+        for u in db(db.auth_user.id.belongs(usuario_ids)).select():
+            usuarios[u.id] = u.email
+
+    pagos = [_preparar_pago(p,
+                            negocio_nombre=negocios.get(p.negocio_id),
+                            usuario_email=usuarios.get(p.usuario_id))
+             for p in pagos_raw]
+
     return dict(
-        **contexto_base(),
-        pagos=resultado["registros"],
-        total=resultado["total"],
-        pagina=resultado["pagina"],
-        total_paginas=resultado["total_paginas"],
-        estado_filtro=estado,
+        total=total, pagos=pagos, estado_filtro=estado,
+        pagina=pagina, total_paginas=total_paginas,
         titulo="Validacion de Pagos",
     )
 
+
 @action("catalogo_cuba/superadmin/pago/validar/<pago_id:int>", method=["POST"])
-@action.uses(auth, session, db)
+@action.uses(db, session, auth.user, contexto_base)
 def superadmin_validar_pago(pago_id):
-    """Validar un pago manualmente."""
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
+
     pago = db.pago[pago_id]
     if not pago:
         return respuesta_json(exito=False, mensaje="Pago no encontrado")
-    
-    estado = request.POST.get("estado", "validado")
-    notas = request.POST.get("notas", "")
-    
+
+    estado = request.forms.get("estado", "validado")
+    notas = request.forms.get("notas", "")
     user = auth.get_user()
-    
+
     db(db.pago.id == pago_id).update(
-        estado=estado,
-        fecha_validacion=ahora_cuba(),
+        estado=estado, fecha_validacion=ahora_cuba(),
         validado_por=user["id"] if user else None,
         notas_validacion=notas,
     )
     db.commit()
-    
-    # Si el pago se valida, actualizar la suscripcion
+
     if estado == "validado":
         suscripcion = db.suscripcion[pago.suscripcion_id]
         if suscripcion:
-            nueva_fecha_fin = max(
-                suscripcion.fecha_fin,
-                ahora_cuba().date()
-            ) + timedelta(days=30)
-            
+            base = max(suscripcion.fecha_fin, ahora_cuba().date()) if suscripcion.fecha_fin else ahora_cuba().date()
+            nueva_fecha_fin = base + timedelta(days=30)
             db(db.suscripcion.id == pago.suscripcion_id).update(
-                estado="activa",
-                fecha_fin=nueva_fecha_fin,
+                estado="activa", fecha_fin=nueva_fecha_fin,
                 fecha_pago=ahora_cuba(),
-                monto_pagado=pago.monto,
-                moneda_pago=pago.moneda,
+                monto_pagado=pago.monto, moneda_pago=pago.moneda,
             )
-            db.commit()
-            
-            # Notificar al usuario
             db.notificacion.insert(
-                usuario_id=pago.usuario_id,
-                tipo="pago_validado",
+                usuario_id=pago.usuario_id, tipo="pago_validado",
                 titulo="Pago validado",
-                mensaje=f"Su pago de {pago.monto} {pago.moneda} ha sido validado. Su suscripcion esta activa hasta {nueva_fecha_fin.strftime('%d/%m/%Y')}.",
+                mensaje="Su pago de %s %s ha sido validado. Su suscripcion esta activa hasta %s." % (
+                    pago.monto, pago.moneda, nueva_fecha_fin.strftime('%d/%m/%Y')),
                 fecha_creacion=ahora_cuba(),
             )
             db.commit()
-    
-    return respuesta_json(exito=True, mensaje=f"Pago {estado} correctamente")
+
+    return respuesta_json(exito=True, mensaje="Pago %s correctamente" % estado)
+
 
 # ============================================================
 # CONFIGURACION GLOBAL (SUPERADMIN)
 # ============================================================
 
 @action("catalogo_cuba/superadmin/configuracion")
-@action.uses(auth, session, db, "superadmin_configuracion.html")
+@action.uses(AccionBase, "superadmin_configuracion.html")
 def superadmin_configuracion():
-    """Configuracion global del sitio."""
     if not es_superadmin():
         raise HTTP(403)
-    
-    configuraciones = db(db.configuracion.id > 0).select(orderby=db.configuracion.clave)
-    
-    return dict(
-        **contexto_base(),
-        configuraciones=configuraciones,
-        titulo="Configuracion Global",
-    )
+
+    configuraciones_raw = db(db.configuracion.id > 0).select(orderby=db.configuracion.clave)
+    configuraciones = [{
+        'id': c.id, 'clave': c.clave, 'valor': c.valor,
+        'descripcion': c.descripcion, 'tipo': c.tipo,
+    } for c in configuraciones_raw]
+
+    return dict(configuraciones=configuraciones, titulo="Configuracion Global")
+
 
 @action("catalogo_cuba/superadmin/configuracion/guardar", method=["POST"])
-@action.uses(auth, session, db)
+@action.uses(db, session, auth.user, contexto_base)
 def superadmin_guardar_configuracion():
-    """Guardar configuracion."""
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
+
     try:
-        clave = request.POST.get("clave")
-        valor = request.POST.get("valor")
-        
+        clave = request.forms.get("clave")
+        valor = request.forms.get("valor")
+        tipo = request.forms.get("tipo", "string")
+        descripcion = request.forms.get("descripcion", "")
+
         config = db(db.configuracion.clave == clave).select().first()
         if config:
             db(db.configuracion.id == config.id).update(
-                valor=valor,
-                fecha_actualizacion=ahora_cuba(),
+                valor=valor, fecha_actualizacion=ahora_cuba(),
             )
         else:
             db.configuracion.insert(
-                clave=clave,
-                valor=valor,
+                clave=clave, valor=valor, tipo=tipo,
+                descripcion=descripcion,
                 fecha_actualizacion=ahora_cuba(),
             )
         db.commit()
-        
         return respuesta_json(exito=True, mensaje="Configuracion guardada")
-    
     except Exception as e:
-        return respuesta_json(exito=False, mensaje=f"Error: {str(e)}")
+        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+
 
 # ============================================================
-# API DE NOTIFICACIONES
+# NOTIFICACIONES
 # ============================================================
 
 @action("catalogo_cuba/api/notificaciones")
-@action.uses(auth)
+@action.uses(db, session, auth.user)
 def api_notificaciones():
-    """API para obtener notificaciones del usuario."""
     user = auth.get_user()
     if not user:
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
-    notificaciones = db(db.notificacion.usuario_id == user["id"]).select(
-        orderby=~db.notificacion.fecha_creacion,
-        limitby=(0, 20)
+
+    notifs = db(db.notificacion.usuario_id == user["id"]).select(
+        orderby=~db.notificacion.fecha_creacion, limitby=(0, 20)
     )
-    
-    no_leidas = db(db.notificacion.usuario_id == user["id"])(
-        db.notificacion.leida == False).count()
-    
+    no_leidas = db(
+        (db.notificacion.usuario_id == user["id"]) & (db.notificacion.leida == False)
+    ).count()
+
     return respuesta_json(exito=True, datos={
-        "notificaciones": [
-            {
-                "id": n.id,
-                "tipo": n.tipo,
-                "titulo": n.titulo,
-                "mensaje": n.mensaje,
-                "leida": n.leida,
-                "fecha": formatear_fecha(n.fecha_creacion),
-            }
-            for n in notificaciones
-        ],
+        "notificaciones": [{
+            "id": n.id, "tipo": n.tipo, "titulo": n.titulo,
+            "mensaje": n.mensaje, "leida": n.leida,
+            "fecha": formatear_fecha(n.fecha_creacion),
+        } for n in notifs],
         "no_leidas": no_leidas,
     })
 
+
 @action("catalogo_cuba/api/notificacion/leer/<notificacion_id:int>", method=["POST"])
-@action.uses(auth)
+@action.uses(db, session, auth.user)
 def api_marcar_leida(notificacion_id):
-    """Marcar notificacion como leida."""
     user = auth.get_user()
     if not user:
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
-    
-    db(db.notificacion.id == notificacion_id)(
-        db.notificacion.usuario_id == user["id"]).update(
-        leida=True,
-        fecha_lectura=ahora_cuba(),
-    )
+
+    db(
+        (db.notificacion.id == notificacion_id) &
+        (db.notificacion.usuario_id == user["id"])
+    ).update(leida=True, fecha_lectura=ahora_cuba())
     db.commit()
-    
     return respuesta_json(exito=True, mensaje="Notificacion marcada como leida")
 
+
 # ============================================================
-# FUNCIONES AUXILIARES
+# AUXILIARES
 # ============================================================
 
 def verificar_suscripcion_activa(negocio_id):
-    """Verifica si un negocio tiene una suscripcion activa o en prueba."""
-    suscripcion = db(db.suscripcion.negocio_id == negocio_id).select(
-        orderby=~db.suscripcion.fecha_creacion,
-        limitby=(0, 1)
+    s = db(db.suscripcion.negocio_id == negocio_id).select(
+        orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)
     ).first()
-    
-    if not suscripcion:
+    if not s:
         return False
-    
-    if suscripcion.estado in ["activa", "prueba"]:
-        # Verificar que no haya vencido
-        if suscripcion.fecha_fin and suscripcion.fecha_fin >= ahora_cuba().date():
+    if s.estado in ["activa", "prueba"]:
+        if s.fecha_fin and s.fecha_fin >= ahora_cuba().date():
             return True
-    
     return False
+
 
 # ============================================================
 # STATIC FILES
@@ -1486,25 +1640,17 @@ def verificar_suscripcion_activa(negocio_id):
 @action("catalogo_cuba/uploads/<filename:path>")
 @action.uses()
 def serve_uploads(filename):
-    """Servir archivos subidos."""
     ruta = os.path.join(settings.UPLOAD_FOLDER, filename)
-    if os.path.exists(ruta):
-        # Detectar content type
-        ext = os.path.splitext(filename)[1].lower()
-        content_type = "application/octet-stream"
-        if ext in [".jpg", ".jpeg"]:
-            content_type = "image/jpeg"
-        elif ext == ".png":
-            content_type = "image/png"
-        elif ext == ".gif":
-            content_type = "image/gif"
-        elif ext == ".webp":
-            content_type = "image/webp"
-        
-        response.headers["Content-Type"] = content_type
-        response.headers["Cache-Control"] = "public, max-age=86400"
-        
-        with open(ruta, "rb") as f:
-            return f.read()
-    
-    raise HTTP(404, "Archivo no encontrado")
+    if not os.path.exists(ruta):
+        raise HTTP(404, "Archivo no encontrado")
+
+    ext = os.path.splitext(filename)[1].lower()
+    content_type = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
+    }.get(ext, "application/octet-stream")
+
+    response.headers["Content-Type"] = content_type
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    with open(ruta, "rb") as f:
+        return f.read()
