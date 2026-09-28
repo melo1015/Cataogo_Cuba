@@ -1,0 +1,122 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link active">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link">📦 Productos</a>
+            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link">🏷️ Categorias</a>
+            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link">📋 Inventario</a>
+            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link">💳 Suscripcion</a>
+            <a href="{{=URL('catalogo_cuba/admin/estadisticas')}}" class="sidebar-link">📈 Estadisticas</a>
+            <a href="{{=URL('catalogo_cuba/admin/negocio/editar')}}" class="sidebar-link">⚙️ Mi Negocio</a>
+            <a href="{{=URL('catalogo_cuba/negocio', negocio.slug)}}" class="sidebar-link" target="_blank">🌐 Ver catalogo</a>
+            <a href="{{=URL('auth/logout')}}" class="sidebar-link">🚪 Cerrar sesion</a>
+        </nav>
+    </aside>
+    
+    <!-- Main content -->
+    <div class="admin-main">
+        <div class="flex-between mb-3" style="flex-wrap:wrap;gap:1rem">
+            <div>
+                <h1 style="font-size:1.3rem">📊 Dashboard</h1>
+                <p class="text-sm">{{=negocio.nombre}}</p>
+            </div>
+            <div>
+                {{if suscripcion:}}
+                    {{if suscripcion.estado == 'activa':}}
+                    <span class="badge badge-green">✅ Activo hasta {{=suscripcion.fecha_fin.strftime('%d/%m/%Y') if suscripcion.fecha_fin else ''}}</span>
+                    {{elif suscripcion.estado == 'prueba':}}
+                    <span class="badge badge-blue">🎁 Prueba hasta {{=suscripcion.fecha_fin.strftime('%d/%m/%Y') if suscripcion.fecha_fin else ''}}</span>
+                    {{elif suscripcion.estado == 'vencida':}}
+                    <span class="badge badge-red">❌ Suscripcion vencida</span>
+                    {{else:}}
+                    <span class="badge badge-yellow">⏳ {{=suscripcion.estado}}</span>
+                    {{pass}}
+                {{else:}}
+                <span class="badge badge-red">Sin suscripcion</span>
+                {{pass}}
+            </div>
+        </div>
+        
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{=total_productos}}</div>
+                <div class="stat-label">Total productos</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{=productos_activos}}</div>
+                <div class="stat-label">Productos activos</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{=total_categorias}}</div>
+                <div class="stat-label">Categorias</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{=visitas_recientes}}</div>
+                <div class="stat-label">Visitas (7 dias)</div>
+            </div>
+        </div>
+        
+        <!-- Alertas -->
+        {{if bajo_stock:}}
+        <div class="alert alert-error mb-3">
+            <strong>⚠️ Stock bajo:</strong> Tienes {{=len(bajo_stock)}} producto(s) con stock menor o igual a 5 unidades.
+            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" style="text-decoration:underline">Ver inventario</a>
+        </div>
+        {{pass}}
+        
+        {{if suscripcion and suscripcion.estado == 'vencida':}}
+        <div class="alert alert-error mb-3">
+            <strong>❌ Suscripcion vencida:</strong> Tu catalogo no es visible para los clientes. 
+            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" style="text-decoration:underline">Renovar suscripcion</a>
+        </div>
+        {{pass}}
+        
+        <!-- Productos mas vistos -->
+        <div class="card">
+            <h2 style="font-size:1.1rem;margin-bottom:1rem">🔥 Productos mas vistos</h2>
+            {{if mas_vistos:}}
+            <table class="table">
+                <thead>
+                    <tr><th>Producto</th><th>Vistas</th><th>Stock</th><th>Estado</th></tr>
+                </thead>
+                <tbody>
+                    {{for p in mas_vistos:}}
+                    <tr>
+                        <td>
+                            <a href="{{=URL('catalogo_cuba/admin/producto/editar', p.id)}}">{{=p.nombre}}</a>
+                        </td>
+                        <td>{{=p.vistas or 0}}</td>
+                        <td>{{=p.stock or 0}}</td>
+                        <td>
+                            {{if p.disponible:}}
+                            <span class="badge badge-green">Activo</span>
+                            {{else:}}
+                            <span class="badge badge-red">Inactivo</span>
+                            {{pass}}
+                        </td>
+                    </tr>
+                    {{pass}}
+                </tbody>
+            </table>
+            {{else:}}
+            <p class="text-sm">Aun no hay datos de visitas</p>
+            {{pass}}
+        </div>
+        
+        <!-- Acciones rapidas -->
+        <div class="grid grid-2 mt-3">
+            <a href="{{=URL('catalogo_cuba/admin/producto/nuevo')}}" class="btn btn-primary" style="justify-content:center;padding:1rem">
+                ➕ Agregar producto
+            </a>
+            <a href="{{=URL('catalogo_cuba/admin/categoria/nueva')}}" class="btn btn-secondary" style="justify-content:center;padding:1rem">
+                ➕ Nueva categoria
+            </a>
+        </div>
+    </div>
+</div>
+{{end}}
