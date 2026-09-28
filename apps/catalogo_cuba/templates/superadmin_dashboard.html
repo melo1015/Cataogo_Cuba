@@ -1,17 +1,18 @@
-{{extend 'layout.html'}}
+[[# superadmin_dashboard.html]]
+[[extend 'layout.html']]
 
-{{block main}}
+[[block main]]
 <div class="admin-layout">
     <aside class="sidebar">
         <nav>
-            <a href="{{=URL('catalogo_cuba/superadmin')}}" class="sidebar-link active">📊 Dashboard</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}" class="sidebar-link">🏪 Negocios</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}" class="sidebar-link">👥 Usuarios</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}" class="sidebar-link">💳 Suscripciones</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/pagos')}}" class="sidebar-link">💰 Pagos</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/configuracion')}}" class="sidebar-link">⚙️ Configuracion</a>
-            <a href="{{=URL('catalogo_cuba')}}" class="sidebar-link">🌐 Ver sitio</a>
-            <a href="{{=URL('auth/logout')}}" class="sidebar-link">🚪 Cerrar sesion</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin')]]" class="sidebar-link active">📊 Dashboard</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'negocios')]]" class="sidebar-link">🏪 Negocios</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios')]]" class="sidebar-link">👥 Usuarios</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'suscripciones')]]" class="sidebar-link">💳 Suscripciones</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'pagos')]]" class="sidebar-link">💰 Pagos</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'configuracion')]]" class="sidebar-link">⚙️ Configuracion</a>
+            <a href="[[=URL('catalogo_cuba')]]" class="sidebar-link">🌐 Ver sitio</a>
+            <a href="[[=URL('auth', 'logout')]]" class="sidebar-link">🚪 Cerrar sesion</a>
         </nav>
     </aside>
     
@@ -21,100 +22,91 @@
         <!-- Stats generales -->
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-value">{{=total_negocios}}</div>
+                <div class="stat-value">[[=total_negocios]]</div>
                 <div class="stat-label">Total negocios</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" style="color:#22c55e">{{=negocios_activos}}</div>
+                <div class="stat-value" style="color:#22c55e">[[=negocios_activos]]</div>
                 <div class="stat-label">Negocios activos</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" style="color:#f59e0b">{{=negocios_pendientes}}</div>
+                <div class="stat-value" style="color:#f59e0b">[[=negocios_pendientes]]</div>
                 <div class="stat-label">Pendientes</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{{=total_usuarios}}</div>
+                <div class="stat-value">[[=total_usuarios]]</div>
                 <div class="stat-label">Usuarios</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{{=total_productos}}</div>
+                <div class="stat-value">[[=total_productos]]</div>
                 <div class="stat-label">Productos</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" style="color:#22c55e">{{=suscripciones_activas}}</div>
+                <div class="stat-value" style="color:#22c55e">[[=suscripciones_activas]]</div>
                 <div class="stat-label">Suscripciones activas</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" style="color:#ef4444">{{=suscripciones_vencidas}}</div>
+                <div class="stat-value" style="color:#ef4444">[[=suscripciones_vencidas]]</div>
                 <div class="stat-label">Vencidas</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" style="color:#8b5cf6">{{=suscripciones_prueba}}</div>
+                <div class="stat-value" style="color:#8b5cf6">[[=suscripciones_prueba]]</div>
                 <div class="stat-label">En prueba</div>
             </div>
         </div>
         
         <!-- Alertas -->
-        {{if pagos_pendientes > 0:}}
+        [[if pagos_pendientes > 0:]]
         <div class="alert alert-yellow mt-3">
-            <strong>💰 {{=pagos_pendientes}} pago(s) pendiente(s) de validacion.</strong>
-            <a href="{{=URL('catalogo_cuba/superadmin/pagos')}}" style="text-decoration:underline">Revisar pagos</a>
+            <strong>💰 [[=pagos_pendientes]] pago(s) pendiente(s) de validacion.</strong>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'pagos')]]" style="text-decoration:underline">Revisar pagos</a>
         </div>
-        {{pass}}
+        [[pass]]
         
-        {{if negocios_pendientes > 0:}}
+        [[if negocios_pendientes > 0:]]
         <div class="alert alert-info mt-3">
-            <strong>🏪 {{=negocios_pendientes}} negocio(s) pendiente(s) de aprobacion.</strong>
-            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}?estado=pendientes" style="text-decoration:underline">Revisar negocios</a>
+            <strong>🏪 [[=negocios_pendientes]] negocio(s) pendiente(s) de aprobacion.</strong>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'negocios', vars=dict(estado='pendientes'))]]" style="text-decoration:underline">Revisar negocios</a>
         </div>
-        {{pass}}
+        [[pass]]
         
         <!-- Negocios recientes -->
         <div class="card mt-3">
             <h2 style="font-size:1.1rem;margin-bottom:1rem">🏪 Negocios recientes</h2>
-            {{if negocios_recientes:}}
+            [[if negocios_recientes:]]
             <div style="overflow-x:auto">
                 <table class="table">
                     <thead>
                         <tr><th>Negocio</th><th>Propietario</th><th>Provincia</th><th>Estado</th><th>Fecha</th></tr>
                     </thead>
                     <tbody>
-                        {{for n in negocios_recientes:}}
+                        [[for n in negocios_recientes:]]
                         <tr>
                             <td>
                                 <div class="flex" style="gap:.5rem">
-                                    {{if n.logo:}}
-                                    <img src="/catalogo_cuba/uploads/{{=n.logo}}" style="width:30px;height:30px;object-fit:cover;border-radius:4px" loading="lazy">
-                                    {{else:}}
+                                    [[if n.logo:]]
+                                    <img src="[[=URL('catalogo_cuba', 'uploads', n.logo)]]" style="width:30px;height:30px;object-fit:cover;border-radius:4px" loading="lazy">
+                                    [[else:]]
                                     <div style="width:30px;height:30px;background:var(--color-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:.8rem">🏪</div>
-                                    {{pass}}
-                                    <a href="{{=URL('catalogo_cuba/negocio', n.slug)}}" target="_blank">{{=n.nombre}}</a>
+                                    [[pass]]
+                                    <a href="[[=URL('catalogo_cuba', 'negocio', n.slug)]]" target="_blank">[[=n.nombre]]</a>
                                 </div>
                             </td>
-                            <td class="text-sm">
-                                {{usuario = db.auth_user[n.usuario_id]}}
-                                {{=usuario.email if usuario else '-'}}
-                            </td>
-                            <td class="text-sm">{{=n.provincia or '-'}}</td>
+                            <td class="text-sm">[[=n.propietario_email or '-']]</td>
+                            <td class="text-sm">[[=n.provincia or '-']]</td>
                             <td>
-                                {{if n.aprobado and n.activo:}}
-                                <span class="badge badge-green">Activo</span>
-                                {{elif not n.aprobado:}}
-                                <span class="badge badge-yellow">Pendiente</span>
-                                {{else:}}
-                                <span class="badge badge-red">Inactivo</span>
-                                {{pass}}
+                                <span class="badge [[=n.badge_estado_clase]]">[[=n.badge_estado_texto]]</span>
                             </td>
-                            <td class="text-sm">{{=n.fecha_creacion.strftime('%d/%m/%Y') if n.fecha_creacion else '-'}}</td>
+                            <td class="text-sm">[[=n.fecha_creacion_texto]]</td>
                         </tr>
-                        {{pass}}
+                        [[pass]]
                     </tbody>
                 </table>
             </div>
-            {{else:}}
+            [[else:]]
             <p class="text-sm">No hay negocios registrados aun</p>
-            {{pass}}
+            [[pass]]
         </div>
     </div>
 </div>
-{{end}}
+[[end]]
