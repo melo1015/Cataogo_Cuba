@@ -47,9 +47,9 @@
                         <td>
                             <select class="select-rol-usuario" data-id="[[=u.id]]"
                                     style="padding:.3rem;border:1px solid var(--border);border-radius:4px;font-size:.85rem">
-                                <option value="visitante" [[='selected' if u.rol == 'visitante' else '']]>Visitante</option>
-                                <option value="comerciante" [[='selected' if u.rol == 'comerciante' else '']]>Comerciante</option>
-                                <option value="superadmin" [[='selected' if u.rol == 'superadmin' else '']]>Superadmin</option>
+                                <option value="visitante" [[='selected' if 'visitante' in u.roles else '']]>Visitante</option>
+                                <option value="comerciante" [[='selected' if 'comerciante' in u.roles else '']]>Comerciante</option>
+                                <option value="superadmin" [[='selected' if 'superadmin' in u.roles else '']]>Superadmin</option>
                             </select>
                         </td>
                         <td class="text-sm">[[=u.telefono or '-']]</td>
