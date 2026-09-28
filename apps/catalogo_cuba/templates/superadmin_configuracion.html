@@ -1,59 +1,68 @@
-{{extend 'layout.html'}}
+[[# superadmin_configuracion.html]]
+[[extend 'layout.html']]
 
-{{block main}}
+[[block main]]
 <div class="admin-layout">
     <aside class="sidebar">
         <nav>
-            <a href="{{=URL('catalogo_cuba/superadmin')}}" class="sidebar-link">📊 Dashboard</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}" class="sidebar-link">🏪 Negocios</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}" class="sidebar-link">👥 Usuarios</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}" class="sidebar-link">💳 Suscripciones</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/pagos')}}" class="sidebar-link">💰 Pagos</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/configuracion')}}" class="sidebar-link active">⚙️ Configuracion</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin')]]" class="sidebar-link">📊 Dashboard</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'negocios')]]" class="sidebar-link">🏪 Negocios</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios')]]" class="sidebar-link">👥 Usuarios</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'suscripciones')]]" class="sidebar-link">💳 Suscripciones</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'pagos')]]" class="sidebar-link">💰 Pagos</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'configuracion')]]" class="sidebar-link active">⚙️ Configuracion</a>
         </nav>
     </aside>
     
     <div class="admin-main">
         <h1 style="font-size:1.3rem;margin-bottom:1rem">⚙️ Configuracion Global</h1>
         
+        <!-- Config para JS -->
+        <div id="config-urls"
+             data-url-guardar="[[=URL('catalogo_cuba', 'superadmin', 'configuracion', 'guardar')]]"
+             style="display:none"></div>
+        
         <div class="card">
             <h2 style="font-size:1.1rem;margin-bottom:1rem">Parametros del sistema</h2>
             
-            {{if configuraciones:}}
+            [[if configuraciones:]]
             <div style="overflow-x:auto">
                 <table class="table">
                     <thead>
                         <tr><th>Clave</th><th>Valor</th><th>Descripcion</th><th>Tipo</th><th>Acciones</th></tr>
                     </thead>
                     <tbody>
-                        {{for config in configuraciones:}}
+                        [[for config in configuraciones:]]
                         <tr>
-                            <td style="font-weight:500;font-family:monospace;font-size:.85rem">{{=config.clave}}</td>
+                            <td style="font-weight:500;font-family:monospace;font-size:.85rem">[[=config.clave]]</td>
                             <td>
-                                <input type="text" id="config-{{=config.id}}" value="{{=config.valor or ''}}"
+                                <input type="text" class="config-valor" data-id="[[=config.id]]" value="[[=config.valor or '']]"
                                        style="width:100%;min-width:200px;padding:.4rem;border:1px solid var(--border);border-radius:4px;font-size:.85rem">
                             </td>
-                            <td class="text-sm">{{=config.descripcion or ''}}</td>
-                            <td class="text-sm">{{=config.tipo or 'string'}}</td>
+                            <td class="text-sm">[[=config.descripcion or '']]</td>
+                            <td class="text-sm">[[=config.tipo or 'string']]</td>
                             <td>
-                                <button onclick="guardarConfig({{=config.id}},'{{=config.clave}}')" class="btn btn-primary btn-sm">💾</button>
+                                <button type="button"
+                                        class="btn btn-primary btn-sm btn-guardar-config"
+                                        data-id="[[=config.id]]"
+                                        data-clave="[[=config.clave]]">💾</button>
                             </td>
                         </tr>
-                        {{pass}}
+                        [[pass]]
                     </tbody>
                 </table>
             </div>
-            {{else:}}
+            [[else:]]
             <div class="empty-state">
                 <p class="text-sm">No hay configuraciones personalizadas. El sistema usa valores por defecto.</p>
             </div>
-            {{pass}}
+            [[pass]]
         </div>
         
         <!-- Agregar nueva configuracion -->
         <div class="card mt-3">
             <h2 style="font-size:1.1rem;margin-bottom:1rem">➕ Nueva configuracion</h2>
-            <form onsubmit="return crearConfig(event)">
+            <form id="form-nueva-config">
                 <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:.5rem">
                     <div class="form-group">
                         <label>Clave</label>
@@ -103,42 +112,61 @@
         </div>
     </div>
 </div>
-{{end}}
+[[end]]
 
-{{block scripts}}
+[[block scripts]]
 <script>
-function guardarConfig(id, clave){
-    const valor = document.getElementById('config-'+id).value;
-    const form = new FormData();
-    form.append('clave', clave);
-    form.append('valor', valor);
-    
-    fetch('/catalogo_cuba/superadmin/configuracion/guardar', {method:'POST', body:form})
-    .then(r=>r.json())
-    .then(d=>{
-        if(d.exito) alert('Guardado correctamente');
-        else alert('Error: '+d.mensaje);
-    })
-    .catch(()=>alert('Error de conexion'));
-}
+(function(){
+    const urlGuardar = document.getElementById('config-urls').dataset.urlGuardar;
 
-function crearConfig(e){
-    e.preventDefault();
-    const clave = document.getElementById('new-clave').value;
-    const valor = document.getElementById('new-valor').value;
-    
-    const form = new FormData();
-    form.append('clave', clave);
-    form.append('valor', valor);
-    
-    fetch('/catalogo_cuba/superadmin/configuracion/guardar', {method:'POST', body:form})
-    .then(r=>r.json())
-    .then(d=>{
-        if(d.exito) { alert('Creado correctamente'); location.reload(); }
-        else alert('Error: '+d.mensaje);
-    })
-    .catch(()=>alert('Error de conexion'));
-    return false;
-}
+    function guardarConfig(id, clave){
+        const valor = document.querySelector('.config-valor[data-id="' + id + '"]').value;
+
+        const form = new FormData();
+        form.append('clave', clave);
+        form.append('valor', valor);
+
+        fetch(urlGuardar, {method: 'POST', body: form})
+            .then(r => r.json())
+            .then(d => {
+                if (d.exito) alert('Guardado correctamente');
+                else alert('Error: ' + d.mensaje);
+            })
+            .catch(() => alert('Error de conexion'));
+    }
+
+    // Botones guardar de la tabla
+    document.querySelectorAll('.btn-guardar-config').forEach(btn => {
+        btn.addEventListener('click', () => {
+            guardarConfig(btn.dataset.id, btn.dataset.clave);
+        });
+    });
+
+    // Formulario de nueva configuracion
+    const formNueva = document.getElementById('form-nueva-config');
+    if (formNueva) {
+        formNueva.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const clave = document.getElementById('new-clave').value;
+            const valor = document.getElementById('new-valor').value;
+            const tipo = document.getElementById('new-tipo').value;
+            const descripcion = document.getElementById('new-descripcion').value;
+
+            const form = new FormData();
+            form.append('clave', clave);
+            form.append('valor', valor);
+            form.append('tipo', tipo);
+            form.append('descripcion', descripcion);
+
+            fetch(urlGuardar, {method: 'POST', body: form})
+                .then(r => r.json())
+                .then(d => {
+                    if (d.exito) { alert('Creado correctamente'); location.reload(); }
+                    else alert('Error: ' + d.mensaje);
+                })
+                .catch(() => alert('Error de conexion'));
+        });
+    }
+})();
 </script>
-{{end}}
+[[end]]
