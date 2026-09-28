@@ -1,0 +1,117 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link">📦 Productos</a>
+            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link">🏷️ Categorias</a>
+            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link active">📋 Inventario</a>
+            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link">💳 Suscripcion</a>
+        </nav>
+    </aside>
+    
+    <div class="admin-main">
+        <h1 style="font-size:1.3rem;margin-bottom:1rem">📋 Inventario</h1>
+        
+        <!-- Stats -->
+        <div class="stats-grid mb-3">
+            <div class="stat-card">
+                <div class="stat-value">{{=total_productos}}</div>
+                <div class="stat-label">Total productos</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color:var(--color-primary)">{{=productos_agotados}}</div>
+                <div class="stat-label">Agotados</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color:#d97706">{{=bajo_stock}}</div>
+                <div class="stat-label">Stock bajo</div>
+            </div>
+        </div>
+        
+        <!-- Tabla de inventario -->
+        <div class="card" style="overflow-x:auto">
+            <table class="table" id="tabla-inventario">
+                <thead>
+                    <tr>
+                        <th>Producto</th>
+                        <th>SKU</th>
+                        <th>Stock actual</th>
+                        <th>Estado</th>
+                        <th>Accion rapida</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{for prod in productos:}}
+                    <tr data-producto-id="{{=prod.id}}" class="{{='fila-agotado' if (prod.stock or 0)<=0 else ('fila-bajo' if (prod.stock or 0)<=5 else '')}}" 
+                        style="{{='background:rgba(254,226,226,.3)' if (prod.stock or 0)<=0 else ('background:rgba(254,243,199,.3)' if (prod.stock or 0)<=5 else '')}}">
+                        <td>
+                            <div class="flex" style="gap:.5rem">
+                                {{if prod.imagen_principal:}}
+                                <img src="/catalogo_cuba/uploads/{{=prod.imagen_principal}}" style="width:35px;height:35px;object-fit:cover;border-radius:4px" loading="lazy">
+                                {{else:}}
+                                <div style="width:35px;height:35px;background:var(--color-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1rem">📦</div>
+                                {{pass}}
+                                <a href="{{=URL('catalogo_cuba/admin/producto/editar', prod.id)}}">{{=prod.nombre}}</a>
+                            </div>
+                        </td>
+                        <td class="text-sm">{{=prod.sku or '-'}}</td>
+                        <td>
+                            <input type="number" class="stock-input" data-id="{{=prod.id}}" 
+                                   value="{{=prod.stock or 0}}" min="0"
+                                   style="width:80px;padding:.3rem;border:1px solid var(--border);border-radius:4px;text-align:center">
+                        </td>
+                        <td>
+                            {{if (prod.stock or 0) <= 0:}}
+                            <span class="badge badge-red">Agotado</span>
+                            {{elif (prod.stock or 0) <= 5:}}
+                            <span class="badge badge-yellow">Bajo</span>
+                            {{else:}}
+                            <span class="badge badge-green">OK</span>
+                            {{pass}}
+                        </td>
+                        <td>
+                            <button onclick="guardarStock({{=prod.id}})" class="btn btn-primary btn-sm">💾 Guardar</button>
+                        </td>
+                    </tr>
+                    {{pass}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{block scripts}}
+<script>
+function guardarStock(productoId){
+    const input=document.querySelector('.stock-input[data-id="'+productoId+'"]');
+    const nuevoStock=input.value;
+    
+    fetch('/catalogo_cuba/api/inventario/actualizar',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({producto_id:productoId,stock:nuevoStock})
+    })
+    .then(r=>r.json())
+    .then(data=>{
+        if(data.exito){
+            input.style.borderColor='#22c55e';
+            setTimeout(()=>input.style.borderColor='',1000);
+        } else {
+            alert('Error: '+data.mensaje);
+        }
+    })
+    .catch(()=>alert('Error de conexion'));
+}
+
+// Guardar al presionar Enter
+document.querySelectorAll('.stock-input').forEach(input=>{
+    input.addEventListener('keypress',e=>{
+        if(e.key==='Enter') guardarStock(input.dataset.id);
+    });
+});
+</script>
+{{end}}
