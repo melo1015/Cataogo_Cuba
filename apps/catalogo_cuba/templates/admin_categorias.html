@@ -1,58 +1,57 @@
-{{extend 'layout.html'}}
+# admin_categorias.html
+[[extend 'layout.html']]
 
-{{block main}}
+[[block main]]
 <div class="admin-layout">
     <aside class="sidebar">
         <nav>
-            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link">📊 Dashboard</a>
-            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link">📦 Productos</a>
-            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link active">🏷️ Categorias</a>
-            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link">📋 Inventario</a>
-            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link">💳 Suscripcion</a>
+            <a href="[[=URL('catalogo_cuba', 'admin')]]" class="sidebar-link">📊 Dashboard</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'productos')]]" class="sidebar-link">📦 Productos</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'categorias')]]" class="sidebar-link active">🏷️ Categorias</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'inventario')]]" class="sidebar-link">📋 Inventario</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'suscripcion')]]" class="sidebar-link">💳 Suscripcion</a>
         </nav>
     </aside>
     
     <div class="admin-main">
         <div class="flex-between mb-3" style="flex-wrap:wrap;gap:1rem">
             <h1 style="font-size:1.3rem">🏷️ Categorias</h1>
-            <a href="{{=URL('catalogo_cuba/admin/categoria/nueva')}}" class="btn btn-primary">➕ Nueva categoria</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'categoria', 'nueva')]]" class="btn btn-primary">➕ Nueva categoria</a>
         </div>
         
-        {{if categorias:}}
+        [[if categorias:]]
         <div class="grid grid-3">
-            {{for cat in categorias:}}
+            [[for cat in categorias:]]
             <div class="card">
                 <div class="flex-between" style="margin-bottom:.5rem">
-                    <h3 style="font-size:1rem">{{=cat.nombre}}</h3>
+                    <h3 style="font-size:1rem">[[=cat.nombre]]</h3>
                     <div class="flex" style="gap:.3rem">
-                        <a href="{{=URL('catalogo_cuba/admin/categoria/editar', cat.id)}}" class="btn btn-secondary btn-sm">✏️</a>
+                        <a href="[[=URL('catalogo_cuba', 'admin', 'categoria', 'editar', cat.id)]]" class="btn btn-secondary btn-sm">✏️</a>
                     </div>
                 </div>
-                {{if cat.descripcion:}}
-                <p class="text-sm">{{=cat.descripcion}}</p>
-                {{pass}}
+                [[if cat.descripcion:]]
+                <p class="text-sm">[[=cat.descripcion]]</p>
+                [[pass]]
                 <div class="flex-between mt-2">
-                    <span class="text-sm">Orden: {{=cat.orden or 0}}</span>
-                    {{if cat.activa:}}
+                    <span class="text-sm">Orden: [[=cat.orden or 0]]</span>
+                    [[if cat.activa:]]
                     <span class="badge badge-green">Activa</span>
-                    {{else:}}
+                    [[else:]]
                     <span class="badge badge-red">Inactiva</span>
-                    {{pass}}
+                    [[pass]]
                 </div>
-                <!-- Contar productos -->
-                {{cantidad = db(db.producto.categoria_id == cat.id).count()}}
-                <p class="text-sm mt-1">{{=cantidad}} producto(s)</p>
+                <p class="text-sm mt-1">[[=cat.cantidad_productos]] producto(s)</p>
             </div>
-            {{pass}}
+            [[pass]]
         </div>
-        {{else:}}
+        [[else:]]
         <div class="empty-state card">
             <div style="font-size:3rem;margin-bottom:1rem">🏷️</div>
             <h3>No tienes categorias</h3>
             <p class="text-sm mb-2">Las categorias ayudan a organizar tus productos</p>
-            <a href="{{=URL('catalogo_cuba/admin/categoria/nueva')}}" class="btn btn-primary">➕ Crear categoria</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'categoria', 'nueva')]]" class="btn btn-primary">➕ Crear categoria</a>
         </div>
-        {{pass}}
+        [[pass]]
     </div>
 </div>
-{{end}}
+[[end]]
