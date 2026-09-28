@@ -1,42 +1,43 @@
-{{extend 'layout.html'}}
+[[# admin_productos.html]]
+[[extend 'layout.html']]
 
-{{block main}}
+[[block main]]
 <div class="admin-layout">
     <aside class="sidebar">
         <nav>
-            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link">📊 Dashboard</a>
-            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link active">📦 Productos</a>
-            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link">🏷️ Categorias</a>
-            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link">📋 Inventario</a>
-            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link">💳 Suscripcion</a>
-            <a href="{{=URL('catalogo_cuba/admin/negocio/editar')}}" class="sidebar-link">⚙️ Mi Negocio</a>
+            <a href="[[=URL('catalogo_cuba', 'admin')]]" class="sidebar-link">📊 Dashboard</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'productos')]]" class="sidebar-link active">📦 Productos</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'categorias')]]" class="sidebar-link">🏷️ Categorias</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'inventario')]]" class="sidebar-link">📋 Inventario</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'suscripcion')]]" class="sidebar-link">💳 Suscripcion</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'negocio', 'editar')]]" class="sidebar-link">⚙️ Mi Negocio</a>
         </nav>
     </aside>
     
     <div class="admin-main">
         <div class="flex-between mb-3" style="flex-wrap:wrap;gap:1rem">
-            <h1 style="font-size:1.3rem">📦 Mis productos ({{=total}})</h1>
-            <a href="{{=URL('catalogo_cuba/admin/producto/nuevo')}}" class="btn btn-primary">➕ Nuevo producto</a>
+            <h1 style="font-size:1.3rem">📦 Mis productos ([[=total]])</h1>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'producto', 'nuevo')]]" class="btn btn-primary">➕ Nuevo producto</a>
         </div>
         
         <!-- Filtros -->
         <div class="card mb-3">
             <form method="GET" class="flex" style="gap:.5rem;flex-wrap:wrap">
-                <input type="search" name="q" placeholder="Buscar producto..." value="{{=filtro_nombre or ''}}" 
+                <input type="search" name="q" placeholder="Buscar producto..." value="[[=filtro_nombre or '']]" 
                        style="flex:1;min-width:200px;padding:.5rem;border:1px solid var(--border);border-radius:var(--radius)">
                 <select name="categoria" style="padding:.5rem;border:1px solid var(--border);border-radius:var(--radius)">
                     <option value="">Todas las categorias</option>
-                    {{for cat in categorias:}}
-                    <option value="{{=cat.id}}" {{='selected' if str(filtro_categoria)==str(cat.id) else ''}}>{{=cat.nombre}}</option>
-                    {{pass}}
+                    [[for cat in categorias:]]
+                    <option value="[[=cat.id]]" [[='selected' if str(filtro_categoria) == str(cat.id) else '']]>[[=cat.nombre]]</option>
+                    [[pass]]
                 </select>
                 <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
-                <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="btn btn-secondary btn-sm">Limpiar</a>
+                <a href="[[=URL('catalogo_cuba', 'admin', 'productos')]]" class="btn btn-secondary btn-sm">Limpiar</a>
             </form>
         </div>
         
         <!-- Tabla de productos -->
-        {{if productos:}}
+        [[if productos:]]
         <div class="card" style="overflow-x:auto">
             <table class="table">
                 <thead>
@@ -51,94 +52,94 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {{for prod in productos:}}
+                    [[for prod in productos:]]
                     <tr>
                         <td>
                             <div class="flex" style="gap:.5rem">
-                                {{if prod.imagen_principal:}}
-                                <img src="/catalogo_cuba/uploads/{{=prod.imagen_principal}}" 
+                                [[if prod.imagen_principal:]]
+                                <img src="[[=URL('catalogo_cuba', 'uploads', prod.imagen_principal)]]" 
                                      style="width:40px;height:40px;object-fit:cover;border-radius:4px" loading="lazy">
-                                {{else:}}
+                                [[else:]]
                                 <div style="width:40px;height:40px;background:var(--color-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.2rem">📦</div>
-                                {{pass}}
+                                [[pass]]
                                 <div>
-                                    <div style="font-weight:500;font-size:.9rem">{{=prod.nombre}}</div>
-                                    {{if prod.sku:}}
-                                    <div class="text-sm">SKU: {{=prod.sku}}</div>
-                                    {{pass}}
+                                    <div style="font-weight:500;font-size:.9rem">[[=prod.nombre]]</div>
+                                    [[if prod.sku:]]
+                                    <div class="text-sm">SKU: [[=prod.sku]]</div>
+                                    [[pass]]
                                 </div>
                             </div>
                         </td>
                         <td>
-                            {{if prod.precio:}}
-                            {{='%.2f' % prod.precio}} {{=prod.moneda or 'CUP'}}
-                            {{else:}}
+                            [[if prod.precio_texto:]]
+                            [[=prod.precio_texto]]
+                            [[else:]]
                             <span class="text-sm">-</span>
-                            {{pass}}
+                            [[pass]]
                         </td>
-                        <td>{{=prod.stock or 0}}</td>
+                        <td>[[=prod.stock or 0]]</td>
                         <td>
-                            {{if prod.categoria_id:}}
-                            {{=db.categoria[prod.categoria_id].nombre if db.categoria[prod.categoria_id] else '-'}}
-                            {{else:}}
+                            [[if prod.categoria_nombre:]]
+                            [[=prod.categoria_nombre]]
+                            [[else:]]
                             <span class="text-sm">Sin categoria</span>
-                            {{pass}}
+                            [[pass]]
                         </td>
                         <td>
-                            {{if prod.disponible:}}
+                            [[if prod.disponible:]]
                             <span class="badge badge-green">Activo</span>
-                            {{else:}}
+                            [[else:]]
                             <span class="badge badge-red">Inactivo</span>
-                            {{pass}}
-                            {{if prod.en_oferta:}}
+                            [[pass]]
+                            [[if prod.en_oferta:]]
                             <span class="badge badge-yellow">Oferta</span>
-                            {{pass}}
-                            {{if prod.destacado:}}
+                            [[pass]]
+                            [[if prod.destacado:]]
                             <span class="badge badge-blue">Destacado</span>
-                            {{pass}}
+                            [[pass]]
                         </td>
-                        <td>{{=prod.vistas or 0}}</td>
+                        <td>[[=prod.vistas or 0]]</td>
                         <td>
                             <div class="flex" style="gap:.3rem">
-                                <a href="{{=URL('catalogo_cuba/admin/producto/editar', prod.id)}}" class="btn btn-secondary btn-sm">✏️</a>
-                                <a href="{{=URL('catalogo_cuba/negocio', negocio.slug, 'producto', prod.slug)}}" target="_blank" class="btn btn-secondary btn-sm">👁️</a>
+                                <a href="[[=URL('catalogo_cuba', 'admin', 'producto', 'editar', prod.id)]]" class="btn btn-secondary btn-sm">✏️</a>
+                                <a href="[[=URL('catalogo_cuba', 'negocio', negocio.slug, 'producto', prod.slug)]]" target="_blank" class="btn btn-secondary btn-sm">👁️</a>
                             </div>
                         </td>
                     </tr>
-                    {{pass}}
+                    [[pass]]
                 </tbody>
             </table>
         </div>
         
         <!-- Paginacion -->
-        {{if total_paginas > 1:}}
+        [[if total_paginas > 1:]]
         <div class="pagination">
-            {{if pagina > 1:}}
-            <a href="{{=URL('catalogo_cuba/admin/productos')}}?pagina={{=pagina-1}}&q={{=filtro_nombre or ''}}&categoria={{=filtro_categoria or ''}}">← Anterior</a>
-            {{pass}}
+            [[if pagina > 1:]]
+            <a href="[[=URL('catalogo_cuba', 'admin', 'productos', vars=dict(pagina=pagina-1, q=filtro_nombre or '', categoria=filtro_categoria or ''))]]">← Anterior</a>
+            [[pass]]
             
-            {{for p in range(1, total_paginas + 1):}}
-                {{if p == pagina:}}
-                <span class="current">{{=p}}</span>
-                {{else:}}
-                <a href="{{=URL('catalogo_cuba/admin/productos')}}?pagina={{=p}}&q={{=filtro_nombre or ''}}&categoria={{=filtro_categoria or ''}}">{{=p}}</a>
-                {{pass}}
-            {{pass}}
+            [[for p in range(1, total_paginas + 1):]]
+                [[if p == pagina:]]
+                <span class="current">[[=p]]</span>
+                [[else:]]
+                <a href="[[=URL('catalogo_cuba', 'admin', 'productos', vars=dict(pagina=p, q=filtro_nombre or '', categoria=filtro_categoria or ''))]]">[[=p]]</a>
+                [[pass]]
+            [[pass]]
             
-            {{if pagina < total_paginas:}}
-            <a href="{{=URL('catalogo_cuba/admin/productos')}}?pagina={{=pagina+1}}&q={{=filtro_nombre or ''}}&categoria={{=filtro_categoria or ''}}">Siguiente →</a>
-            {{pass}}
+            [[if pagina < total_paginas:]]
+            <a href="[[=URL('catalogo_cuba', 'admin', 'productos', vars=dict(pagina=pagina+1, q=filtro_nombre or '', categoria=filtro_categoria or ''))]]">Siguiente →</a>
+            [[pass]]
         </div>
-        {{pass}}
+        [[pass]]
         
-        {{else:}}
+        [[else:]]
         <div class="empty-state card">
             <div style="font-size:3rem;margin-bottom:1rem">📦</div>
             <h3>No tienes productos aun</h3>
             <p class="text-sm mb-2">Agrega tu primer producto para comenzar</p>
-            <a href="{{=URL('catalogo_cuba/admin/producto/nuevo')}}" class="btn btn-primary">➕ Agregar producto</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'producto', 'nuevo')]]" class="btn btn-primary">➕ Agregar producto</a>
         </div>
-        {{pass}}
+        [[pass]]
     </div>
 </div>
-{{end}}
+[[end]]
