@@ -1,0 +1,110 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/superadmin')}}" class="sidebar-link">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}" class="sidebar-link">🏪 Negocios</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}" class="sidebar-link">👥 Usuarios</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}" class="sidebar-link active">💳 Suscripciones</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/pagos')}}" class="sidebar-link">💰 Pagos</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/configuracion')}}" class="sidebar-link">⚙️ Configuracion</a>
+        </nav>
+    </aside>
+    
+    <div class="admin-main">
+        <div class="flex-between mb-3" style="flex-wrap:wrap;gap:1rem">
+            <h1 style="font-size:1.3rem">💳 Suscripciones ({{=total}})</h1>
+        </div>
+        
+        <!-- Filtros -->
+        <div class="tabs">
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}" class="tab {{='active' if not estado_filtro else ''}}">Todas</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}?estado=activa" class="tab {{='active' if estado_filtro=='activa' else ''}}">Activas</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}?estado=prueba" class="tab {{='active' if estado_filtro=='prueba' else ''}}">Prueba</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}?estado=vencida" class="tab {{='active' if estado_filtro=='vencida' else ''}}">Vencidas</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}?estado=pendiente" class="tab {{='active' if estado_filtro=='pendiente' else ''}}">Pendientes</a>
+        </div>
+        
+        {{if suscripciones:}}
+        <div class="card" style="overflow-x:auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Negocio</th>
+                        <th>Usuario</th>
+                        <th>Inicio</th>
+                        <th>Vencimiento</th>
+                        <th>Estado</th>
+                        <th>Metodo</th>
+                        <th>Monto</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{for s in suscripciones:}}
+                    <tr>
+                        <td>
+                            {{neg = db.negocio[s.negocio_id]}}
+                            {{=neg.nombre if neg else 'Desconocido'}}
+                        </td>
+                        <td class="text-sm">
+                            {{usr = db.auth_user[s.usuario_id]}}
+                            {{=usr.email if usr else 'Desconocido'}}
+                        </td>
+                        <td class="text-sm">{{=s.fecha_inicio.strftime('%d/%m/%Y') if s.fecha_inicio else '-'}}</td>
+                        <td class="text-sm">{{=s.fecha_fin.strftime('%d/%m/%Y') if s.fecha_fin else '-'}}</td>
+                        <td>
+                            {{if s.estado == 'activa':}}
+                            <span class="badge badge-green">Activa</span>
+                            {{elif s.estado == 'prueba':}}
+                            <span class="badge badge-blue">Prueba</span>
+                            {{elif s.estado == 'vencida':}}
+                            <span class="badge badge-red">Vencida</span>
+                            {{elif s.estado == 'pendiente':}}
+                            <span class="badge badge-yellow">Pendiente</span>
+                            {{else:}}
+                            <span class="badge">{{=s.estado}}</span>
+                            {{pass}}
+                        </td>
+                        <td class="text-sm">
+                            {{if s.metodo_pago == 'transfermovil':}}📱 Transfermovil
+                            {{elif s.metodo_pago == 'presencial':}}💵 Presencial
+                            {{elif s.metodo_pago == 'usdt':}}💎 USDT
+                            {{elif s.metodo_pago == 'prueba':}}🎁 Gratis
+                            {{else:}}{{=s.metodo_pago or '-'}}{{pass}}
+                        </td>
+                        <td>{{='%.2f' % (s.monto_pagado or 0)}} {{=s.moneda_pago or 'CUP'}}</td>
+                    </tr>
+                    {{pass}}
+                </tbody>
+            </table>
+        </div>
+        
+        {{if total_paginas > 1:}}
+        <div class="pagination">
+            {{if pagina > 1:}}
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}?pagina={{=pagina-1}}&estado={{=estado_filtro or ''}}">← Anterior</a>
+            {{pass}}
+            {{for p in range(1, total_paginas + 1):}}
+                {{if p == pagina:}}
+                <span class="current">{{=p}}</span>
+                {{else:}}
+                <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}?pagina={{=p}}&estado={{=estado_filtro or ''}}">{{=p}}</a>
+                {{pass}}
+            {{pass}}
+            {{if pagina < total_paginas:}}
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}?pagina={{=pagina+1}}&estado={{=estado_filtro or ''}}">Siguiente →</a>
+            {{pass}}
+        </div>
+        {{pass}}
+        
+        {{else:}}
+        <div class="empty-state card">
+            <div style="font-size:3rem;margin-bottom:1rem">💳</div>
+            <h3>No hay suscripciones</h3>
+        </div>
+        {{pass}}
+    </div>
+</div>
+{{end}}
