@@ -1,0 +1,160 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/superadmin')}}" class="sidebar-link">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}" class="sidebar-link active">🏪 Negocios</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}" class="sidebar-link">👥 Usuarios</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}" class="sidebar-link">💳 Suscripciones</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/pagos')}}" class="sidebar-link">💰 Pagos</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/configuracion')}}" class="sidebar-link">⚙️ Configuracion</a>
+        </nav>
+    </aside>
+    
+    <div class="admin-main">
+        <div class="flex-between mb-3" style="flex-wrap:wrap;gap:1rem">
+            <h1 style="font-size:1.3rem">🏪 Gestion de Negocios ({{=total}})</h1>
+        </div>
+        
+        <!-- Filtros -->
+        <div class="tabs">
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}" class="tab {{='active' if not estado_filtro else ''}}">Todos</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}?estado=activos" class="tab {{='active' if estado_filtro=='activos' else ''}}">Activos</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}?estado=pendientes" class="tab {{='active' if estado_filtro=='pendientes' else ''}}">Pendientes</a>
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}?estado=inactivos" class="tab {{='active' if estado_filtro=='inactivos' else ''}}">Inactivos</a>
+        </div>
+        
+        {{if negocios:}}
+        <div class="card" style="overflow-x:auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Negocio</th>
+                        <th>Propietario</th>
+                        <th>Contacto</th>
+                        <th>Productos</th>
+                        <th>Estado</th>
+                        <th>Suscripcion</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{for negocio in negocios:}}
+                    <tr>
+                        <td>
+                            <div class="flex" style="gap:.5rem">
+                                {{if negocio.logo:}}
+                                <img src="/catalogo_cuba/uploads/{{=negocio.logo}}" style="width:35px;height:35px;object-fit:cover;border-radius:4px" loading="lazy">
+                                {{else:}}
+                                <div style="width:35px;height:35px;background:var(--color-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:.8rem">🏪</div>
+                                {{pass}}
+                                <div>
+                                    <div style="font-weight:500;font-size:.9rem">{{=negocio.nombre}}</div>
+                                    <div class="text-sm">{{=negocio.slug}}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-sm">
+                            {{usuario = db.auth_user[negocio.usuario_id]}}
+                            {{=usuario.email if usuario else '-'}}
+                        </td>
+                        <td class="text-sm">
+                            {{if negocio.telefono:}}📞 {{=negocio.telefono}}<br>{{pass}}
+                            {{if negocio.provincia:}}📍 {{=negocio.provincia}}{{pass}}
+                        </td>
+                        <td>
+                            {{cant_prod = db(db.producto.negocio_id == negocio.id).count()}}
+                            {{=cant_prod}}
+                        </td>
+                        <td>
+                            {{if negocio.aprobado:}}
+                                {{if negocio.activo:}}
+                                <span class="badge badge-green">Activo</span>
+                                {{else:}}
+                                <span class="badge badge-red">Inactivo</span>
+                                {{pass}}
+                            {{else:}}
+                            <span class="badge badge-yellow">Pendiente</span>
+                            {{pass}}
+                        </td>
+                        <td>
+                            {{sus = db(db.suscripcion.negocio_id == negocio.id).select(orderby=~db.suscripcion.fecha_creacion,limitby=(0,1)).first()}}
+                            {{if sus:}}
+                                {{if sus.estado == 'activa':}}
+                                <span class="badge badge-green">{{=sus.estado}}</span>
+                                {{elif sus.estado == 'prueba':}}
+                                <span class="badge badge-blue">Prueba</span>
+                                {{elif sus.estado == 'vencida':}}
+                                <span class="badge badge-red">Vencida</span>
+                                {{else:}}
+                                <span class="badge badge-yellow">{{=sus.estado}}</span>
+                                {{pass}}
+                            {{else:}}
+                            <span class="text-sm">-</span>
+                            {{pass}}
+                        </td>
+                        <td>
+                            <div class="flex" style="gap:.3rem">
+                                {{if not negocio.aprobado:}}
+                                <button onclick="aprobarNegocio({{=negocio.id}})" class="btn btn-primary btn-sm">✅ Aprobar</button>
+                                {{pass}}
+                                <button onclick="toggleNegocio({{=negocio.id}})" class="btn btn-secondary btn-sm">
+                                    {{='❌ Desactivar' if negocio.activo else '✅ Activar'}}
+                                </button>
+                                <a href="{{=URL('catalogo_cuba/negocio', negocio.slug)}}" target="_blank" class="btn btn-secondary btn-sm">👁️</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {{pass}}
+                </tbody>
+            </table>
+        </div>
+        
+        {{if total_paginas > 1:}}
+        <div class="pagination">
+            {{if pagina > 1:}}
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}?pagina={{=pagina-1}}&estado={{=estado_filtro or ''}}">← Anterior</a>
+            {{pass}}
+            {{for p in range(1, total_paginas + 1):}}
+                {{if p == pagina:}}
+                <span class="current">{{=p}}</span>
+                {{else:}}
+                <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}?pagina={{=p}}&estado={{=estado_filtro or ''}}">{{=p}}</a>
+                {{pass}}
+            {{pass}}
+            {{if pagina < total_paginas:}}
+            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}?pagina={{=pagina+1}}&estado={{=estado_filtro or ''}}">Siguiente →</a>
+            {{pass}}
+        </div>
+        {{pass}}
+        
+        {{else:}}
+        <div class="empty-state card">
+            <div style="font-size:3rem;margin-bottom:1rem">🏪</div>
+            <h3>No hay negocios</h3>
+        </div>
+        {{pass}}
+    </div>
+</div>
+{{end}}
+
+{{block scripts}}
+<script>
+function aprobarNegocio(id){
+    if(!confirm('¿Aprobar este negocio?')) return;
+    fetch('/catalogo_cuba/superadmin/negocio/aprobar/'+id,{method:'POST'})
+    .then(r=>r.json())
+    .then(d=>{if(d.exito) location.reload(); else alert(d.mensaje);})
+    .catch(()=>alert('Error'));
+}
+function toggleNegocio(id){
+    if(!confirm('¿Cambiar estado de este negocio?')) return;
+    fetch('/catalogo_cuba/superadmin/negocio/toggle/'+id,{method:'POST'})
+    .then(r=>r.json())
+    .then(d=>{if(d.exito) location.reload(); else alert(d.mensaje);})
+    .catch(()=>alert('Error'));
+}
+</script>
+{{end}}
