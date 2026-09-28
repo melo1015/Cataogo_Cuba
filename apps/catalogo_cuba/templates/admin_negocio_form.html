@@ -1,0 +1,161 @@
+{{extend 'layout.html'}}
+
+{{block main}}
+<div class="admin-layout">
+    <aside class="sidebar">
+        <nav>
+            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link">📊 Dashboard</a>
+            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link">📦 Productos</a>
+            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link">🏷️ Categorias</a>
+            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link">📋 Inventario</a>
+            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link">💳 Suscripcion</a>
+            <a href="{{=URL('catalogo_cuba/admin/negocio/editar')}}" class="sidebar-link active">⚙️ Mi Negocio</a>
+        </nav>
+    </aside>
+    
+    <div class="admin-main">
+        <h1 style="font-size:1.3rem;margin-bottom:1rem">
+            {{='⚙️ Editar mi negocio' if modo=='editar' else '🏪 Crear mi negocio'}}
+        </h1>
+        
+        {{if modo == 'crear':}}
+        <div class="alert alert-info mb-3">
+            <strong>🎁 Primer mes gratis!</strong> Completa la informacion de tu negocio para comenzar.
+        </div>
+        {{pass}}
+        
+        <div class="card">
+            {{=form.custom.begin}}
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:1.5rem">
+                <div>
+                    <h2 style="font-size:1rem;margin-bottom:.8rem">📋 Informacion basica</h2>
+                    {{if 'nombre' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Nombre del negocio *</label>
+                        {{=form.custom.widgets['nombre']}}
+                    </div>
+                    {{pass}}
+                    {{if 'descripcion' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Descripcion</label>
+                        {{=form.custom.widgets['descripcion']}}
+                    </div>
+                    {{pass}}
+                    {{if 'logo' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Logo</label>
+                        {{=form.custom.widgets['logo']}}
+                        <p class="text-sm">Se recomienda una imagen cuadrada (max 2MB)</p>
+                    </div>
+                    {{pass}}
+                    {{if 'meta_descripcion' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Meta descripcion (SEO)</label>
+                        {{=form.custom.widgets['meta_descripcion']}}
+                    </div>
+                    {{pass}}
+                </div>
+                
+                <div>
+                    <h2 style="font-size:1rem;margin-bottom:.8rem">📞 Contacto</h2>
+                    {{if 'telefono' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Telefono</label>
+                        {{=form.custom.widgets['telefono']}}
+                    </div>
+                    {{pass}}
+                    {{if 'whatsapp' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>WhatsApp (con codigo de pais)</label>
+                        {{=form.custom.widgets['whatsapp']}}
+                    </div>
+                    {{pass}}
+                    {{if 'email' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Correo electronico</label>
+                        {{=form.custom.widgets['email']}}
+                    </div>
+                    {{pass}}
+                    {{if 'direccion' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Direccion</label>
+                        {{=form.custom.widgets['direccion']}}
+                    </div>
+                    {{pass}}
+                    {{if 'horario' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Horario de atencion</label>
+                        {{=form.custom.widgets['horario']}}
+                    </div>
+                    {{pass}}
+                </div>
+                
+                <div>
+                    <h2 style="font-size:1rem;margin-bottom:.8rem">📍 Ubicacion</h2>
+                    {{if 'provincia' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Provincia</label>
+                        {{=form.custom.widgets['provincia']}}
+                    </div>
+                    {{pass}}
+                    {{if 'municipio' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Municipio</label>
+                        {{=form.custom.widgets['municipio']}}
+                    </div>
+                    {{pass}}
+                </div>
+                
+                <div>
+                    <h2 style="font-size:1rem;margin-bottom:.8rem">🎨 Personalizacion</h2>
+                    {{if 'color_tema' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Color del tema</label>
+                        {{=form.custom.widgets['color_tema']}}
+                    </div>
+                    {{pass}}
+                    {{if 'moneda_principal' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Moneda principal</label>
+                        {{=form.custom.widgets['moneda_principal']}}
+                    </div>
+                    {{pass}}
+                    {{if 'mostrar_precios' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>{{=form.custom.widgets['mostrar_precios']}} Mostrar precios publicamente</label>
+                    </div>
+                    {{pass}}
+                </div>
+                
+                <div>
+                    <h2 style="font-size:1rem;margin-bottom:.8rem">🌐 Redes sociales</h2>
+                    {{if 'facebook' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Facebook URL</label>
+                        {{=form.custom.widgets['facebook']}}
+                    </div>
+                    {{pass}}
+                    {{if 'instagram' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Instagram URL</label>
+                        {{=form.custom.widgets['instagram']}}
+                    </div>
+                    {{pass}}
+                    {{if 'telegram' in form.custom.widgets:}}
+                    <div class="form-group">
+                        <label>Telegram URL</label>
+                        {{=form.custom.widgets['telegram']}}
+                    </div>
+                    {{pass}}
+                </div>
+            </div>
+            
+            <div class="flex" style="gap:1rem;margin-top:1.5rem">
+                <button type="submit" class="btn btn-primary">💾 Guardar</button>
+                <a href="{{=URL('catalogo_cuba/admin')}}" class="btn btn-secondary">Cancelar</a>
+            </div>
+            {{=form.custom.end}}
+        </div>
+    </div>
+</div>
+{{end}}
