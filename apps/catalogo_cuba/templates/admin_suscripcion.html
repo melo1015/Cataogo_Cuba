@@ -1,81 +1,69 @@
-{{extend 'layout.html'}}
+[[# admin_suscripcion.html]]
+[[extend 'layout.html']]
 
-{{block main}}
+[[block main]]
 <div class="admin-layout">
     <aside class="sidebar">
         <nav>
-            <a href="{{=URL('catalogo_cuba/admin')}}" class="sidebar-link">📊 Dashboard</a>
-            <a href="{{=URL('catalogo_cuba/admin/productos')}}" class="sidebar-link">📦 Productos</a>
-            <a href="{{=URL('catalogo_cuba/admin/categorias')}}" class="sidebar-link">🏷️ Categorias</a>
-            <a href="{{=URL('catalogo_cuba/admin/inventario')}}" class="sidebar-link">📋 Inventario</a>
-            <a href="{{=URL('catalogo_cuba/admin/suscripcion')}}" class="sidebar-link active">💳 Suscripcion</a>
+            <a href="[[=URL('catalogo_cuba', 'admin')]]" class="sidebar-link">📊 Dashboard</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'productos')]]" class="sidebar-link">📦 Productos</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'categorias')]]" class="sidebar-link">🏷️ Categorias</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'inventario')]]" class="sidebar-link">📋 Inventario</a>
+            <a href="[[=URL('catalogo_cuba', 'admin', 'suscripcion')]]" class="sidebar-link active">💳 Suscripcion</a>
         </nav>
     </aside>
     
     <div class="admin-main">
         <h1 style="font-size:1.3rem;margin-bottom:1rem">💳 Mi suscripcion</h1>
         
+        <!-- Config para JS -->
+        <div id="pago-config" data-url-pago="[[=URL('catalogo_cuba', 'admin', 'pago', 'realizar')]]" style="display:none"></div>
+        
         <!-- Estado actual -->
         <div class="card mb-3">
             <h2 style="font-size:1.1rem;margin-bottom:1rem">📋 Estado actual</h2>
             
-            {{if suscripcion:}}
+            [[if suscripcion:]]
             <div class="grid grid-2">
                 <div>
                     <p class="text-sm">Estado</p>
                     <p style="font-size:1.1rem;font-weight:600">
-                        {{if suscripcion.estado == 'activa':}}
-                        <span class="badge badge-green">✅ Activa</span>
-                        {{elif suscripcion.estado == 'prueba':}}
-                        <span class="badge badge-blue">🎁 Periodo de prueba</span>
-                        {{elif suscripcion.estado == 'vencida':}}
-                        <span class="badge badge-red">❌ Vencida</span>
-                        {{elif suscripcion.estado == 'pendiente':}}
-                        <span class="badge badge-yellow">⏳ Pendiente de pago</span>
-                        {{else:}}
-                        <span class="badge badge-yellow">{{=suscripcion.estado}}</span>
-                        {{pass}}
+                        <span class="badge [[=suscripcion.estado_badge_clase]]">[[=suscripcion.estado_badge_texto]]</span>
                     </p>
                 </div>
                 <div>
                     <p class="text-sm">Metodo de pago</p>
-                    <p style="font-size:1.1rem;font-weight:600">
-                        {{if suscripcion.metodo_pago == 'transfermovil':}}📱 Transfermovil
-                        {{elif suscripcion.metodo_pago == 'presencial':}}💵 Pago presencial
-                        {{elif suscripcion.metodo_pago == 'usdt':}}💎 USDT
-                        {{elif suscripcion.metodo_pago == 'prueba':}}🎁 Gratis
-                        {{else:}}-{{pass}}
-                    </p>
+                    <p style="font-size:1.1rem;font-weight:600">[[=suscripcion.metodo_pago_texto]]</p>
                 </div>
                 <div>
                     <p class="text-sm">Fecha de inicio</p>
-                    <p style="font-weight:500">{{=suscripcion.fecha_inicio.strftime('%d/%m/%Y') if suscripcion.fecha_inicio else '-'}}</p>
+                    <p style="font-weight:500">[[=suscripcion.fecha_inicio_texto]]</p>
                 </div>
                 <div>
                     <p class="text-sm">Vencimiento</p>
-                    <p style="font-weight:500">{{=suscripcion.fecha_fin.strftime('%d/%m/%Y') if suscripcion.fecha_fin else '-'}}</p>
+                    <p style="font-weight:500">[[=suscripcion.fecha_fin_texto]]</p>
                 </div>
                 <div>
                     <p class="text-sm">Monto pagado</p>
-                    <p style="font-weight:500">{{='%.2f' % (suscripcion.monto_pagado or 0)}} {{=suscripcion.moneda_pago or 'CUP'}}</p>
+                    <p style="font-weight:500">[[=suscripcion.monto_pagado_texto]]</p>
                 </div>
             </div>
             
-            {{if suscripcion.estado in ['vencida', 'pendiente']:}}
+            [[if suscripcion.necesita_renovacion:]]
             <div class="alert alert-error mt-3">
                 <strong>⚠️ Tu suscripcion necesita renovacion.</strong> Tu catalogo no sera visible para los clientes hasta que renueves.
             </div>
-            {{pass}}
+            [[pass]]
             
-            {{else:}}
+            [[else:]]
             <div class="alert alert-info mt-3">
                 No tienes una suscripcion activa. Crea tu negocio para comenzar tu periodo de prueba gratis.
             </div>
-            {{pass}}
+            [[pass]]
         </div>
         
         <!-- Metodos de pago -->
-        {{if not suscripcion or suscripcion.estado in ['vencida', 'pendiente']:}}
+        [[if mostrar_renovacion:]]
         <div class="card mb-3">
             <h2 style="font-size:1.1rem;margin-bottom:1rem">💰 Renovar suscripcion</h2>
             <p style="margin-bottom:1rem">Selecciona un metodo de pago para renovar tu suscripcion mensual:</p>
@@ -85,24 +73,39 @@
                 <div class="card" style="border:2px solid var(--border)">
                     <h3 style="font-size:1rem;margin-bottom:.5rem">📱 Transfermovil</h3>
                     <p class="text-sm mb-2">Realiza una transferencia via Transfermovil y registra el pago aqui.</p>
-                    <p style="font-size:1.2rem;font-weight:700;color:var(--color-primary);margin-bottom:.5rem">{{=costo_cup}} CUP/mes</p>
-                    <button onclick="mostrarFormularioPago('transfermovil', {{=costo_cup}}, 'CUP')" class="btn btn-primary" style="width:100%">Seleccionar</button>
+                    <p style="font-size:1.2rem;font-weight:700;color:var(--color-primary);margin-bottom:.5rem">[[=costo_cup]] CUP/mes</p>
+                    <button type="button"
+                            class="btn btn-primary btn-seleccionar-pago"
+                            data-metodo="transfermovil"
+                            data-monto="[[=costo_cup]]"
+                            data-moneda="CUP"
+                            style="width:100%">Seleccionar</button>
                 </div>
                 
                 <!-- Pago presencial -->
                 <div class="card" style="border:2px solid var(--border)">
                     <h3 style="font-size:1rem;margin-bottom:.5rem">💵 Pago presencial</h3>
                     <p class="text-sm mb-2">Coordina un pago en persona. Se validara manualmente.</p>
-                    <p style="font-size:1.2rem;font-weight:700;color:var(--color-primary);margin-bottom:.5rem">{{=costo_cup}} CUP/mes</p>
-                    <button onclick="mostrarFormularioPago('presencial', {{=costo_cup}}, 'CUP')" class="btn btn-primary" style="width:100%">Seleccionar</button>
+                    <p style="font-size:1.2rem;font-weight:700;color:var(--color-primary);margin-bottom:.5rem">[[=costo_cup]] CUP/mes</p>
+                    <button type="button"
+                            class="btn btn-primary btn-seleccionar-pago"
+                            data-metodo="presencial"
+                            data-monto="[[=costo_cup]]"
+                            data-moneda="CUP"
+                            style="width:100%">Seleccionar</button>
                 </div>
                 
                 <!-- USDT -->
                 <div class="card" style="border:2px solid var(--border)">
                     <h3 style="font-size:1rem;margin-bottom:.5rem">💎 USDT (TRC20)</h3>
                     <p class="text-sm mb-2">Pago con criptomoneda USDT en red TRON.</p>
-                    <p style="font-size:1.2rem;font-weight:700;color:var(--color-primary);margin-bottom:.5rem">{{=costo_usdt}} USDT/mes</p>
-                    <button onclick="mostrarFormularioPago('usdt', {{=costo_usdt}}, 'USDT')" class="btn btn-primary" style="width:100%">Seleccionar</button>
+                    <p style="font-size:1.2rem;font-weight:700;color:var(--color-primary);margin-bottom:.5rem">[[=costo_usdt]] USDT/mes</p>
+                    <button type="button"
+                            class="btn btn-primary btn-seleccionar-pago"
+                            data-metodo="usdt"
+                            data-monto="[[=costo_usdt]]"
+                            data-moneda="USDT"
+                            style="width:100%">Seleccionar</button>
                 </div>
             </div>
         </div>
@@ -110,7 +113,7 @@
         <!-- Formulario de pago (inicialmente oculto) -->
         <div id="formulario-pago" class="card" style="display:none;border:2px solid var(--color-primary)">
             <h3 style="font-size:1.1rem;margin-bottom:1rem">📝 Registrar pago</h3>
-            <form onsubmit="enviarPago(event)">
+            <form id="form-pago">
                 <input type="hidden" id="pago-metodo" name="metodo_pago">
                 <input type="hidden" id="pago-monto" name="monto">
                 <input type="hidden" id="pago-moneda" name="moneda">
@@ -136,14 +139,14 @@
                 
                 <div class="flex" style="gap:1rem">
                     <button type="submit" class="btn btn-primary">💳 Enviar pago para validacion</button>
-                    <button type="button" onclick="document.getElementById('formulario-pago').style.display='none'" class="btn btn-secondary">Cancelar</button>
+                    <button type="button" id="btn-cancelar-pago" class="btn btn-secondary">Cancelar</button>
                 </div>
             </form>
         </div>
-        {{pass}}
+        [[pass]]
         
         <!-- Historial de pagos -->
-        {{if pagos:}}
+        [[if pagos:]]
         <div class="card mt-3">
             <h2 style="font-size:1.1rem;margin-bottom:1rem">📜 Historial de pagos</h2>
             <div style="overflow-x:auto">
@@ -152,80 +155,86 @@
                         <tr><th>Fecha</th><th>Metodo</th><th>Monto</th><th>Referencia</th><th>Estado</th></tr>
                     </thead>
                     <tbody>
-                        {{for pago in pagos:}}
+                        [[for pago in pagos:]]
                         <tr>
-                            <td>{{=pago.fecha_solicitud.strftime('%d/%m/%Y') if pago.fecha_solicitud else '-'}}</td>
+                            <td>[[=pago.fecha_texto]]</td>
+                            <td>[[=pago.metodo_pago_texto]]</td>
+                            <td>[[=pago.monto_texto]]</td>
+                            <td class="text-sm">[[=pago.referencia or '-']]</td>
                             <td>
-                                {{if pago.metodo_pago == 'transfermovil':}}📱 Transfermovil
-                                {{elif pago.metodo_pago == 'presencial':}}💵 Presencial
-                                {{elif pago.metodo_pago == 'usdt':}}💎 USDT
-                                {{else:}}{{=pago.metodo_pago}}{{pass}}
-                            </td>
-                            <td>{{='%.2f' % (pago.monto or 0)}} {{=pago.moneda or 'CUP'}}</td>
-                            <td class="text-sm">{{=pago.referencia or '-'}}</td>
-                            <td>
-                                {{if pago.estado == 'validado':}}
-                                <span class="badge badge-green">✅ Validado</span>
-                                {{elif pago.estado == 'pendiente':}}
-                                <span class="badge badge-yellow">⏳ Pendiente</span>
-                                {{elif pago.estado == 'rechazado':}}
-                                <span class="badge badge-red">❌ Rechazado</span>
-                                {{else:}}
-                                <span class="badge badge-blue">{{=pago.estado}}</span>
-                                {{pass}}
+                                <span class="badge [[=pago.estado_badge_clase]]">[[=pago.estado_badge_texto]]</span>
                             </td>
                         </tr>
-                        {{pass}}
+                        [[pass]]
                     </tbody>
                 </table>
             </div>
         </div>
-        {{pass}}
+        [[pass]]
     </div>
 </div>
-{{end}}
+[[end]]
 
-{{block scripts}}
+[[block scripts]]
 <script>
-function mostrarFormularioPago(metodo, monto, moneda){
-    document.getElementById('formulario-pago').style.display='block';
-    document.getElementById('formulario-pago').scrollIntoView({behavior:'smooth'});
-    
-    document.getElementById('pago-metodo').value=metodo;
-    document.getElementById('pago-monto').value=monto;
-    document.getElementById('pago-moneda').value=moneda;
-    
-    const metodosDisplay={'transfermovil':'📱 Transfermovil','presencial':'💵 Pago presencial','usdt':'💎 USDT (TRC20)'};
-    document.getElementById('pago-metodo-display').value=metodosDisplay[metodo]||metodo;
-    document.getElementById('pago-monto-display').value=monto+' '+moneda;
-    
-    const instrucciones={
-        'transfermovil':'Ingresa el numero de operacion/transferencia de Transfermovil.',
-        'presencial':'Describe donde y cuando realizaste el pago presencial.',
-        'usdt':'Ingresa el hash de la transaccion en la blockchain de TRON (TRC20).'
-    };
-    document.getElementById('pago-instrucciones').textContent=instrucciones[metodo]||'';
-}
+(function(){
+    const config = document.getElementById('pago-config');
+    const urlPago = config.dataset.urlPago;
 
-function enviarPago(e){
-    e.preventDefault();
-    const form=e.target;
-    const data=new FormData(form);
-    
-    fetch('/catalogo_cuba/admin/pago/realizar',{
-        method:'POST',
-        body:data
-    })
-    .then(r=>r.json())
-    .then(data=>{
-        if(data.exito){
-            alert('Pago registrado correctamente. Pendiente de validacion.');
-            location.reload();
-        } else {
-            alert('Error: '+data.mensaje);
-        }
-    })
-    .catch(()=>alert('Error de conexion. Intenta de nuevo.'));
-}
+    const metodosDisplay = {
+        'transfermovil': '📱 Transfermovil',
+        'presencial': '💵 Pago presencial',
+        'usdt': '💎 USDT (TRC20)'
+    };
+    const instrucciones = {
+        'transfermovil': 'Ingresa el numero de operacion/transferencia de Transfermovil.',
+        'presencial': 'Describe donde y cuando realizaste el pago presencial.',
+        'usdt': 'Ingresa el hash de la transaccion en la blockchain de TRON (TRC20).'
+    };
+
+    function mostrarFormularioPago(metodo, monto, moneda){
+        const form = document.getElementById('formulario-pago');
+        form.style.display = 'block';
+        form.scrollIntoView({behavior: 'smooth'});
+
+        document.getElementById('pago-metodo').value = metodo;
+        document.getElementById('pago-monto').value = monto;
+        document.getElementById('pago-moneda').value = moneda;
+
+        document.getElementById('pago-metodo-display').value = metodosDisplay[metodo] || metodo;
+        document.getElementById('pago-monto-display').value = monto + ' ' + moneda;
+        document.getElementById('pago-instrucciones').textContent = instrucciones[metodo] || '';
+    }
+
+    document.querySelectorAll('.btn-seleccionar-pago').forEach(btn => {
+        btn.addEventListener('click', () => {
+            mostrarFormularioPago(btn.dataset.metodo, btn.dataset.monto, btn.dataset.moneda);
+        });
+    });
+
+    document.getElementById('btn-cancelar-pago').addEventListener('click', () => {
+        document.getElementById('formulario-pago').style.display = 'none';
+    });
+
+    document.getElementById('form-pago').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const data = new FormData(e.target);
+
+        fetch(urlPago, {
+            method: 'POST',
+            body: data
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.exito) {
+                alert('Pago registrado correctamente. Pendiente de validacion.');
+                location.reload();
+            } else {
+                alert('Error: ' + data.mensaje);
+            }
+        })
+        .catch(() => alert('Error de conexion. Intenta de nuevo.'));
+    });
+})();
 </script>
-{{end}}
+[[end]]
