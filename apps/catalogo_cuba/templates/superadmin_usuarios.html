@@ -1,112 +1,129 @@
-{{extend 'layout.html'}}
+[[# superadmin_usuarios.html]]
+[[extend 'layout.html']]
 
-{{block main}}
+[[block main]]
 <div class="admin-layout">
     <aside class="sidebar">
         <nav>
-            <a href="{{=URL('catalogo_cuba/superadmin')}}" class="sidebar-link">📊 Dashboard</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/negocios')}}" class="sidebar-link">🏪 Negocios</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}" class="sidebar-link active">👥 Usuarios</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/suscripciones')}}" class="sidebar-link">💳 Suscripciones</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/pagos')}}" class="sidebar-link">💰 Pagos</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/configuracion')}}" class="sidebar-link">⚙️ Configuracion</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin')]]" class="sidebar-link">📊 Dashboard</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'negocios')]]" class="sidebar-link">🏪 Negocios</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios')]]" class="sidebar-link active">👥 Usuarios</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'suscripciones')]]" class="sidebar-link">💳 Suscripciones</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'pagos')]]" class="sidebar-link">💰 Pagos</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'configuracion')]]" class="sidebar-link">⚙️ Configuracion</a>
         </nav>
     </aside>
     
     <div class="admin-main">
         <div class="flex-between mb-3" style="flex-wrap:wrap;gap:1rem">
-            <h1 style="font-size:1.3rem">👥 Usuarios ({{=total}})</h1>
+            <h1 style="font-size:1.3rem">👥 Usuarios ([[=total]])</h1>
         </div>
+        
+        <!-- Config para JS -->
+        <div id="usuarios-urls"
+             data-url-cambiar-rol="[[=URL('catalogo_cuba', 'superadmin', 'usuario', 'cambiar-rol')]]"
+             style="display:none"></div>
         
         <!-- Filtros -->
         <div class="tabs">
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}" class="tab {{='active' if not rol_filtro else ''}}">Todos</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}?rol=superadmin" class="tab {{='active' if rol_filtro=='superadmin' else ''}}">Superadmins</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}?rol=comerciante" class="tab {{='active' if rol_filtro=='comerciante' else ''}}">Comerciantes</a>
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}?rol=visitante" class="tab {{='active' if rol_filtro=='visitante' else ''}}">Visitantes</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios')]]" class="tab [[='active' if not rol_filtro else '']]">Todos</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios', vars=dict(rol='superadmin'))]]" class="tab [[='active' if rol_filtro == 'superadmin' else '']]">Superadmins</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios', vars=dict(rol='comerciante'))]]" class="tab [[='active' if rol_filtro == 'comerciante' else '']]">Comerciantes</a>
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios', vars=dict(rol='visitante'))]]" class="tab [[='active' if rol_filtro == 'visitante' else '']]">Visitantes</a>
         </div>
         
-        {{if usuarios:}}
+        [[if usuarios:]]
         <div class="card" style="overflow-x:auto">
             <table class="table">
                 <thead>
                     <tr><th>ID</th><th>Email</th><th>Nombre</th><th>Rol</th><th>Telefono</th><th>Registro</th><th>Estado</th><th>Acciones</th></tr>
                 </thead>
                 <tbody>
-                    {{for u in usuarios:}}
+                    [[for u in usuarios:]]
                     <tr>
-                        <td>{{=u.id}}</td>
-                        <td style="font-weight:500">{{=u.email}}</td>
-                        <td>{{=u.first_name or ''}} {{=u.last_name or ''}}</td>
+                        <td>[[=u.id]]</td>
+                        <td style="font-weight:500">[[=u.email]]</td>
+                        <td>[[=u.first_name or '']] [[=u.last_name or '']]</td>
                         <td>
-                            <select onchange="cambiarRol({{=u.id}}, this.value)" 
+                            <select class="select-rol-usuario" data-id="[[=u.id]]"
                                     style="padding:.3rem;border:1px solid var(--border);border-radius:4px;font-size:.85rem">
-                                <option value="visitante" {{='selected' if u.rol=='visitante' else ''}}>Visitante</option>
-                                <option value="comerciante" {{='selected' if u.rol=='comerciante' else ''}}>Comerciante</option>
-                                <option value="superadmin" {{='selected' if u.rol=='superadmin' else ''}}>Superadmin</option>
+                                <option value="visitante" [[='selected' if u.rol == 'visitante' else '']]>Visitante</option>
+                                <option value="comerciante" [[='selected' if u.rol == 'comerciante' else '']]>Comerciante</option>
+                                <option value="superadmin" [[='selected' if u.rol == 'superadmin' else '']]>Superadmin</option>
                             </select>
                         </td>
-                        <td class="text-sm">{{=u.telefono or '-'}}</td>
-                        <td class="text-sm">{{=u.fecha_registro.strftime('%d/%m/%Y') if u.fecha_registro else '-'}}</td>
+                        <td class="text-sm">[[=u.telefono or '-']]</td>
+                        <td class="text-sm">[[=u.fecha_registro_texto]]</td>
                         <td>
-                            {{if u.activo:}}
-                            <span class="badge badge-green">Activo</span>
-                            {{else:}}
-                            <span class="badge badge-red">Inactivo</span>
-                            {{pass}}
+                            <span class="badge [[='badge-green' if u.activo else 'badge-red']]">[[='Activo' if u.activo else 'Inactivo']]</span>
                         </td>
                         <td>
-                            {{neg = db(db.negocio.usuario_id == u.id).select().first()}}
-                            {{if neg:}}
-                            <a href="{{=URL('catalogo_cuba/negocio', neg.slug)}}" target="_blank" class="btn btn-secondary btn-sm">🏪 Ver negocio</a>
-                            {{else:}}
+                            [[if u.negocio_slug:]]
+                            <a href="[[=URL('catalogo_cuba', 'negocio', u.negocio_slug)]]" target="_blank" class="btn btn-secondary btn-sm">🏪 Ver negocio</a>
+                            [[else:]]
                             <span class="text-sm">Sin negocio</span>
-                            {{pass}}
+                            [[pass]]
                         </td>
                     </tr>
-                    {{pass}}
+                    [[pass]]
                 </tbody>
             </table>
         </div>
         
-        {{if total_paginas > 1:}}
+        [[if total_paginas > 1:]]
         <div class="pagination">
-            {{if pagina > 1:}}
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}?pagina={{=pagina-1}}&rol={{=rol_filtro or ''}}">← Anterior</a>
-            {{pass}}
-            {{for p in range(1, total_paginas + 1):}}
-                {{if p == pagina:}}
-                <span class="current">{{=p}}</span>
-                {{else:}}
-                <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}?pagina={{=p}}&rol={{=rol_filtro or ''}}">{{=p}}</a>
-                {{pass}}
-            {{pass}}
-            {{if pagina < total_paginas:}}
-            <a href="{{=URL('catalogo_cuba/superadmin/usuarios')}}?pagina={{=pagina+1}}&rol={{=rol_filtro or ''}}">Siguiente →</a>
-            {{pass}}
+            [[if pagina > 1:]]
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios', vars=dict(pagina=pagina-1, rol=rol_filtro or ''))]]">← Anterior</a>
+            [[pass]]
+            [[for p in range(1, total_paginas + 1):]]
+                [[if p == pagina:]]
+                <span class="current">[[=p]]</span>
+                [[else:]]
+                <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios', vars=dict(pagina=p, rol=rol_filtro or ''))]]">[[=p]]</a>
+                [[pass]]
+            [[pass]]
+            [[if pagina < total_paginas:]]
+            <a href="[[=URL('catalogo_cuba', 'superadmin', 'usuarios', vars=dict(pagina=pagina+1, rol=rol_filtro or ''))]]">Siguiente →</a>
+            [[pass]]
         </div>
-        {{pass}}
+        [[pass]]
         
-        {{else:}}
+        [[else:]]
         <div class="empty-state card">
             <div style="font-size:3rem;margin-bottom:1rem">👥</div>
             <h3>No hay usuarios</h3>
         </div>
-        {{pass}}
+        [[pass]]
     </div>
 </div>
-{{end}}
+[[end]]
 
-{{block scripts}}
+[[block scripts]]
 <script>
-function cambiarRol(userId, nuevoRol){
-    if(!confirm('¿Cambiar rol a "'+nuevoRol+'"?')) return;
-    const form=new FormData();
-    form.append('rol',nuevoRol);
-    fetch('/catalogo_cuba/superadmin/usuario/cambiar-rol/'+userId,{method:'POST',body:form})
-    .then(r=>r.json())
-    .then(d=>{if(d.exito) alert('Rol actualizado'); else alert(d.mensaje);})
-    .catch(()=>alert('Error'));
-}
+(function(){
+    const config = document.getElementById('usuarios-urls');
+    const urlCambiarRol = config.dataset.urlCambiarRol;
+
+    function cambiarRol(userId, nuevoRol){
+        if (!confirm('¿Cambiar rol a "' + nuevoRol + '"?')) return;
+
+        const form = new FormData();
+        form.append('rol', nuevoRol);
+
+        fetch(urlCambiarRol + '/' + userId, {method: 'POST', body: form})
+            .then(r => r.json())
+            .then(d => {
+                if (d.exito) alert('Rol actualizado');
+                else alert(d.mensaje);
+            })
+            .catch(() => alert('Error'));
+    }
+
+    document.querySelectorAll('.select-rol-usuario').forEach(sel => {
+        sel.addEventListener('change', () => {
+            cambiarRol(sel.dataset.id, sel.value);
+        });
+    });
+})();
 </script>
-{{end}}
+[[end]]
