@@ -1,198 +1,212 @@
-{{extend 'layout.html'}}
+[[# catalogo_negocio.html]]
+[[extend 'layout.html']]
 
-{{block main}}
+[[block main]]
 <!-- Header del negocio -->
-<section style="background:linear-gradient(135deg,{{=negocio.color_tema or '#2563eb'}},#1e293b);color:#fff;padding:2rem 0">
+<section style="background:linear-gradient(135deg,[[=negocio.color_tema or '#2563eb']],#1e293b);color:#fff;padding:2rem 0">
     <div class="container">
         <div class="flex" style="gap:1.5rem;flex-wrap:wrap">
-            {{if negocio.logo:}}
-            <img src="/catalogo_cuba/uploads/{{=negocio.logo}}" alt="{{=negocio.nombre}}" 
+            [[if negocio.logo:]]
+            <img src="[[=URL('catalogo_cuba', 'uploads', negocio.logo)]]" alt="[[=negocio.nombre]]" 
                  style="width:90px;height:90px;object-fit:cover;border-radius:50%;border:3px solid rgba(255,255,255,.3)">
-            {{else:}}
+            [[else:]]
             <div style="width:90px;height:90px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2.5rem">🏪</div>
-            {{pass}}
+            [[pass]]
             <div>
-                <h1 style="font-size:1.6rem;margin-bottom:.3rem">{{=negocio.nombre}}</h1>
-                <p style="opacity:.85;font-size:.95rem;max-width:500px">{{=negocio.descripcion or ''}}</p>
+                <h1 style="font-size:1.6rem;margin-bottom:.3rem">[[=negocio.nombre]]</h1>
+                <p style="opacity:.85;font-size:.95rem;max-width:500px">[[=negocio.descripcion or '']]</p>
                 <div class="flex" style="gap:1rem;margin-top:.5rem;flex-wrap:wrap;font-size:.85rem;opacity:.9">
-                    {{if negocio.telefono:}}<span>📞 {{=negocio.telefono}}</span>{{pass}}
-                    {{if negocio.whatsapp:}}<span>💬 {{=negocio.whatsapp}}</span>{{pass}}
-                    {{if negocio.horario:}}<span>🕐 {{=negocio.horario}}</span>{{pass}}
-                    {{if negocio.provincia:}}<span>📍 {{=negocio.provincia}}{{(','+negocio.municipio) if negocio.municipio else ''}}</span>{{pass}}
+                    [[if negocio.telefono:]]<span>📞 [[=negocio.telefono]]</span>[[pass]]
+                    [[if negocio.whatsapp:]]<span>💬 [[=negocio.whatsapp]]</span>[[pass]]
+                    [[if negocio.horario:]]<span>🕐 [[=negocio.horario]]</span>[[pass]]
+                    [[if negocio.provincia:]]<span>📍 [[=negocio.provincia]][[=(',' + negocio.municipio) if negocio.municipio else '']]</span>[[pass]]
                 </div>
-                {{if negocio.facebook or negocio.instagram or negocio.telegram:}}
+                [[if negocio.facebook or negocio.instagram or negocio.telegram:]]
                 <div class="flex" style="gap:.8rem;margin-top:.5rem">
-                    {{if negocio.facebook:}}<a href="{{=negocio.facebook}}" target="_blank" style="color:#fff;opacity:.8;font-size:.85rem">📘 Facebook</a>{{pass}}
-                    {{if negocio.instagram:}}<a href="{{=negocio.instagram}}" target="_blank" style="color:#fff;opacity:.8;font-size:.85rem">📷 Instagram</a>{{pass}}
-                    {{if negocio.telegram:}}<a href="{{=negocio.telegram}}" target="_blank" style="color:#fff;opacity:.8;font-size:.85rem">✈️ Telegram</a>{{pass}}
+                    [[if negocio.facebook:]]<a href="[[=negocio.facebook]]" target="_blank" style="color:#fff;opacity:.8;font-size:.85rem">📘 Facebook</a>[[pass]]
+                    [[if negocio.instagram:]]<a href="[[=negocio.instagram]]" target="_blank" style="color:#fff;opacity:.8;font-size:.85rem">📷 Instagram</a>[[pass]]
+                    [[if negocio.telegram:]]<a href="[[=negocio.telegram]]" target="_blank" style="color:#fff;opacity:.8;font-size:.85rem">✈️ Telegram</a>[[pass]]
                 </div>
-                {{pass}}
+                [[pass]]
             </div>
         </div>
-        {{if not suscripcion_activa:}}
+        [[if not suscripcion_activa:]]
         <div class="alert alert-error mt-2" style="background:rgba(254,226,226,.9);color:#991b1b">
             Este catalogo no esta disponible temporalmente.
         </div>
-        {{pass}}
+        [[pass]]
     </div>
 </section>
 
 <section class="container mt-3">
     <!-- Tabs de categorias -->
     <div class="tabs">
-        <a href="{{=URL('catalogo_cuba/negocio', negocio.slug)}}" class="tab active">🏠 Todos</a>
-        {{for cat in categorias:}}
-        <a href="{{=URL('catalogo_cuba/negocio', negocio.slug, 'categoria', cat.slug)}}" class="tab">{{=cat.nombre}}</a>
-        {{pass}}
+        <a href="[[=URL('catalogo_cuba', 'negocio', negocio.slug)]]" class="tab active">🏠 Todos</a>
+        [[for cat in categorias:]]
+        <a href="[[=URL('catalogo_cuba', 'negocio', negocio.slug, 'categoria', cat.slug)]]" class="tab">[[=cat.nombre]]</a>
+        [[pass]]
     </div>
     
     <!-- Productos destacados -->
-    {{if destacados:}}
+    [[if destacados:]]
     <h2 style="font-size:1.1rem;margin-bottom:1rem">⭐ Destacados</h2>
     <div class="grid grid-4 mb-3">
-        {{for prod in destacados:}}
-        <a href="{{=URL('catalogo_cuba/negocio', negocio.slug, 'producto', prod.slug)}}" 
+        [[for prod in destacados:]]
+        <a href="[[=URL('catalogo_cuba', 'negocio', negocio.slug, 'producto', prod.slug)]]" 
            class="card product-card" style="text-decoration:none;color:inherit;overflow:hidden">
-            {{if prod.imagen_principal:}}
-            <img src="/catalogo_cuba/uploads/{{=prod.imagen_principal}}" alt="{{=prod.nombre}}" class="product-img" loading="lazy">
-            {{else:}}
+            [[if prod.imagen_principal:]]
+            <img src="[[=URL('catalogo_cuba', 'uploads', prod.imagen_principal)]]" alt="[[=prod.nombre]]" class="product-img" loading="lazy">
+            [[else:]]
             <div class="product-img flex" style="justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem">📦</div>
-            {{pass}}
+            [[pass]]
             <div class="product-info">
-                <h3 class="product-name truncate">{{=prod.nombre}}</h3>
-                {{if prod.descripcion_corta:}}
-                <p class="text-sm truncate">{{=prod.descripcion_corta}}</p>
-                {{pass}}
-                {{if negocio.mostrar_precios and prod.precio:}}
+                <h3 class="product-name truncate">[[=prod.nombre]]</h3>
+                [[if prod.descripcion_corta:]]
+                <p class="text-sm truncate">[[=prod.descripcion_corta]]</p>
+                [[pass]]
+                [[if prod.mostrar_precio:]]
                 <div class="flex" style="margin-top:.4rem;align-items:baseline">
-                    <span class="product-price">{{='%.2f' % prod.precio}} {{=prod.moneda or 'CUP'}}</span>
-                    {{if prod.precio_anterior and prod.en_oferta:}}
-                    <span class="product-price-old">{{='%.2f' % prod.precio_anterior}}</span>
-                    {{pass}}
+                    <span class="product-price">[[=prod.precio_texto]]</span>
+                    [[if prod.mostrar_precio_anterior:]]
+                    <span class="product-price-old">[[=prod.precio_anterior_texto]]</span>
+                    [[pass]]
                 </div>
-                {{pass}}
-                {{if prod.en_oferta:}}
+                [[pass]]
+                [[if prod.en_oferta:]]
                 <span class="badge badge-red" style="margin-top:.4rem;display:inline-block">Oferta</span>
-                {{pass}}
+                [[pass]]
             </div>
         </a>
-        {{pass}}
+        [[pass]]
     </div>
-    {{pass}}
+    [[pass]]
     
     <!-- Todos los productos -->
     <h2 style="font-size:1.1rem;margin-bottom:1rem">📦 Todos los productos</h2>
-    {{if productos:}}
-    <div class="grid grid-4" id="catalogo-productos" data-negocio-slug="{{=negocio.slug}}">
-        {{for prod in productos:}}
-        <a href="{{=URL('catalogo_cuba/negocio', negocio.slug, 'producto', prod.slug)}}" 
+    [[if productos:]]
+    <div class="grid grid-4" id="catalogo-productos" 
+         data-negocio-slug="[[=negocio.slug]]"
+         data-url-base-negocio="[[=URL('catalogo_cuba', 'negocio', negocio.slug)]]"
+         data-url-api-catalogo="[[=URL('catalogo_cuba', 'api', 'negocio', negocio.slug, 'catalogo')]]"
+         data-url-uploads="[[=URL('catalogo_cuba', 'uploads', '')]]">
+        [[for prod in productos:]]
+        <a href="[[=URL('catalogo_cuba', 'negocio', negocio.slug, 'producto', prod.slug)]]" 
            class="card product-card" style="text-decoration:none;color:inherit;overflow:hidden">
-            {{if prod.imagen_principal:}}
-            <img src="/catalogo_cuba/uploads/{{=prod.imagen_principal}}" alt="{{=prod.nombre}}" class="product-img" loading="lazy">
-            {{else:}}
+            [[if prod.imagen_principal:]]
+            <img src="[[=URL('catalogo_cuba', 'uploads', prod.imagen_principal)]]" alt="[[=prod.nombre]]" class="product-img" loading="lazy">
+            [[else:]]
             <div class="product-img flex" style="justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem">📦</div>
-            {{pass}}
+            [[pass]]
             <div class="product-info">
-                <h3 class="product-name truncate">{{=prod.nombre}}</h3>
-                {{if prod.descripcion_corta:}}
-                <p class="text-sm truncate">{{=prod.descripcion_corta}}</p>
-                {{pass}}
-                {{if negocio.mostrar_precios and prod.precio:}}
+                <h3 class="product-name truncate">[[=prod.nombre]]</h3>
+                [[if prod.descripcion_corta:]]
+                <p class="text-sm truncate">[[=prod.descripcion_corta]]</p>
+                [[pass]]
+                [[if prod.mostrar_precio:]]
                 <div class="flex" style="margin-top:.4rem;align-items:baseline">
-                    <span class="product-price">{{='%.2f' % prod.precio}} {{=prod.moneda or 'CUP'}}</span>
-                    {{if prod.precio_anterior and prod.en_oferta:}}
-                    <span class="product-price-old">{{='%.2f' % prod.precio_anterior}}</span>
-                    {{pass}}
+                    <span class="product-price">[[=prod.precio_texto]]</span>
+                    [[if prod.mostrar_precio_anterior:]]
+                    <span class="product-price-old">[[=prod.precio_anterior_texto]]</span>
+                    [[pass]]
                 </div>
-                {{pass}}
-                {{if not prod.disponible:}}
-                <span class="badge badge-red" style="margin-top:.4rem;display:inline-block">Agotado</span>
-                {{elif prod.stock is not None and prod.stock <= 5:}}
-                <span class="badge badge-yellow" style="margin-top:.4rem;display:inline-block">Quedan {{=prod.stock}}</span>
-                {{pass}}
+                [[pass]]
+                [[if prod.badge_estado:]]
+                <span class="badge [[=prod.badge_estado_clase]]" style="margin-top:.4rem;display:inline-block">[[=prod.badge_estado]]</span>
+                [[pass]]
             </div>
         </a>
-        {{pass}}
+        [[pass]]
     </div>
     
     <!-- Boton cargar mas (para paginacion via JS) -->
     <div class="text-center mt-3">
-        <button id="cargar-mas" class="btn btn-secondary" data-pagina="2" onclick="cargarMasProductos()">Cargar mas productos</button>
+        <button id="cargar-mas" class="btn btn-secondary" data-pagina="2">Cargar mas productos</button>
     </div>
-    {{else:}}
+    [[else:]]
     <div class="empty-state">
         <div style="font-size:3rem;margin-bottom:1rem">📦</div>
         <h3>Este negocio aun no tiene productos</h3>
     </div>
-    {{pass}}
+    [[pass]]
 </section>
 
 <!-- Boton de contacto WhatsApp flotante -->
-{{if negocio.whatsapp:}}
-<a href="https://wa.me/{{=negocio.whatsapp}}" target="_blank" 
+[[if negocio.whatsapp:]]
+<a href="https://wa.me/[[=negocio.whatsapp]]" target="_blank" 
    style="position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:#25d366;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.8rem;text-decoration:none;box-shadow:0 4px 12px rgba(0,0,0,.25);z-index:100">
     💬
 </a>
-{{pass}}
-{{end}}
+[[pass]]
+[[end]]
 
-{{block scripts}}
+[[block scripts]]
 <script>
+(function(){
+    const contenedor = document.getElementById('catalogo-productos');
+    if (!contenedor) return;
+
+    const negocioSlug = contenedor.dataset.negocioSlug;
+    const urlBaseNegocio = contenedor.dataset.urlBaseNegocio;
+    const urlApiCatalogo = contenedor.dataset.urlApiCatalogo;
+    const urlUploads = contenedor.dataset.urlUploads;
+
     // Guardar catalogo en cache local para modo offline
-    (function(){
-        const negocioSlug='{{=negocio.slug}}';
-        // Descargar y cachear el catalogo completo via API
-        fetch('/catalogo_cuba/api/negocio/'+negocioSlug+'/catalogo')
-            .then(r=>r.json())
-            .then(data=>{
-                if(data.exito){
-                    localStorage.setItem('catalogo_'+negocioSlug,JSON.stringify(data));
-                    localStorage.setItem('catalogo_'+negocioSlug+'_fecha',Date.now());
-                }
-            })
-            .catch(()=>{});
-    })();
-    
+    fetch(urlApiCatalogo)
+        .then(r => r.json())
+        .then(data => {
+            if (data.exito) {
+                localStorage.setItem('catalogo_' + negocioSlug, JSON.stringify(data));
+                localStorage.setItem('catalogo_' + negocioSlug + '_fecha', Date.now());
+            }
+        })
+        .catch(() => {});
+
     // Cargar mas productos via AJAX
-    function cargarMasProductos(){
-        const btn=document.getElementById('cargar-mas');
-        const pagina=btn.dataset.pagina;
-        const slug='{{=negocio.slug}}';
-        btn.textContent='Cargando...';
-        btn.disabled=true;
-        
-        fetch('/catalogo_cuba/api/negocio/'+slug+'/catalogo?page='+pagina)
-            .then(r=>r.json())
-            .then(data=>{
-                if(data.exito && data.productos.length>0){
-                    const cont=document.getElementById('catalogo-productos');
-                    data.productos.forEach(p=>{
-                        const precioHtml=p.precio?`<div class="flex" style="margin-top:.4rem;align-items:baseline">
-                            <span class="product-price">${p.precio} ${p.moneda||'CUP'}</span>
-                            ${p.precio_anterior&&p.en_oferta?`<span class="product-price-old">${p.precio_anterior}</span>`:''}
-                        </div>`:'';
-                        const card=document.createElement('a');
-                        card.className='card product-card';
-                        card.style.cssText='text-decoration:none;color:inherit;overflow:hidden';
-                        card.href='/catalogo_cuba/negocio/'+slug+'/producto/'+p.slug;
-                        card.innerHTML=p.imagen_principal?
-                            `<img src="${p.imagen_principal}" alt="${p.nombre}" class="product-img" loading="lazy">`:
-                            `<div class="product-img flex" style="justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem">📦</div>`;
-                        card.innerHTML+=`<div class="product-info">
-                            <h3 class="product-name truncate">${p.nombre}</h3>
-                            ${p.descripcion_corta?`<p class="text-sm truncate">${p.descripcion_corta}</p>`:''}
-                            ${precioHtml}
-                        </div>`;
-                        cont.appendChild(card);
-                    });
-                    btn.dataset.pagina=parseInt(pagina)+1;
-                    btn.textContent='Cargar mas productos';
-                    btn.disabled=false;
-                } else {
-                    btn.style.display='none';
-                }
-            })
-            .catch(()=>{btn.textContent='Error al cargar';btn.disabled=false;});
+    const btn = document.getElementById('cargar-mas');
+    if (btn) {
+        btn.addEventListener('click', () => {
+            const pagina = btn.dataset.pagina;
+            btn.textContent = 'Cargando...';
+            btn.disabled = true;
+
+            fetch(urlApiCatalogo + '?page=' + pagina)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.exito && data.productos.length > 0) {
+                        data.productos.forEach(p => {
+                            const precioHtml = p.precio_texto
+                                ? `<div class="flex" style="margin-top:.4rem;align-items:baseline">
+                                     <span class="product-price">${p.precio_texto}</span>
+                                     ${p.precio_anterior_texto ? `<span class="product-price-old">${p.precio_anterior_texto}</span>` : ''}
+                                   </div>`
+                                : '';
+
+                            const card = document.createElement('a');
+                            card.className = 'card product-card';
+                            card.style.cssText = 'text-decoration:none;color:inherit;overflow:hidden';
+                            card.href = urlBaseNegocio + '/producto/' + p.slug;
+
+                            const imgHtml = p.imagen_principal
+                                ? `<img src="${urlUploads}${p.imagen_principal}" alt="${p.nombre}" class="product-img" loading="lazy">`
+                                : `<div class="product-img flex" style="justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem">📦</div>`;
+
+                            card.innerHTML = imgHtml + `<div class="product-info">
+                                <h3 class="product-name truncate">${p.nombre}</h3>
+                                ${p.descripcion_corta ? `<p class="text-sm truncate">${p.descripcion_corta}</p>` : ''}
+                                ${precioHtml}
+                            </div>`;
+                            contenedor.appendChild(card);
+                        });
+                        btn.dataset.pagina = parseInt(pagina, 10) + 1;
+                        btn.textContent = 'Cargar mas productos';
+                        btn.disabled = false;
+                    } else {
+                        btn.style.display = 'none';
+                    }
+                })
+                .catch(() => { btn.textContent = 'Error al cargar'; btn.disabled = false; });
+        });
     }
+})();
 </script>
-{{end}}
+[[end]]
