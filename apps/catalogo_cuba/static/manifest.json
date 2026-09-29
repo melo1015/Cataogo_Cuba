@@ -3,11 +3,11 @@
     "short_name": "CatalogoCuba",
     "description": "Directorio de negocios cubanos. Funciona sin conexion.",
     "start_url": "/catalogo_cuba/",
+    "scope": "/catalogo_cuba/",
     "display": "standalone",
+    "orientation": "portrait-primary",
     "background_color": "#f8fafc",
     "theme_color": "#2563eb",
-    "orientation": "portrait-primary",
-    "scope": "/catalogo_cuba/",
     "lang": "es",
     "dir": "ltr",
     "icons": [
