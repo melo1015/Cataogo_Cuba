@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# py4web / database / uploads
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+storage.db
+apps/*/databases/
+apps/*/uploads/*
+!apps/*/uploads/.gitkeep
+
+# Local tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
