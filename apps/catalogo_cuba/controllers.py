@@ -635,10 +635,8 @@ def api_crear_pedido(slug):
     ).select().first()
     if not negocio:
         return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
-    if not verificar_suscripcion_activa(negocio.id):
-        return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
-
-    # Idempotencia dentro del negocio correcto; un UUID ajeno no revela su pedido.
+    # Resolver reintentos antes de validar la suscripcion: un pedido ya guardado
+    # debe seguir siendo reconocible aunque la suscripcion caduque despues.
     existente = db(db.pedido.client_uuid == client_uuid).select().first()
     if existente:
         if existente.negocio_id != negocio.id:
@@ -648,6 +646,9 @@ def api_crear_pedido(slug):
             mensaje="Pedido ya recibido anteriormente",
             datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
         )
+
+    if not verificar_suscripcion_activa(negocio.id):
+        return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
 
     # Consolidar productos repetidos y validar cantidades antes de escribir.
     cantidades = {}
