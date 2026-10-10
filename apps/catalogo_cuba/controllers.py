@@ -832,8 +832,20 @@ def admin_producto_editar(producto_id):
             if nueva:
                 imagen = nueva
 
+        slug_base = slugify(form.vars.get("nombre", producto.nombre)) or "producto"
+        slug = slug_base
+        contador = 1
+        while db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.slug == slug) &
+            (db.producto.id != producto_id)
+        ).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
+
         db(db.producto.id == producto_id).update(
-            slug=slugify(form.vars.get("nombre", producto.nombre)),
+            slug=slug,
+            negocio_id=negocio.id,
             imagen_principal=imagen,
             fecha_actualizacion=ahora_cuba(),
         )
