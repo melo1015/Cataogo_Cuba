@@ -73,6 +73,16 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("producto.stock or 0", body)
         self.assertIn("Solicitud recibida; el negocio debe confirmar disponibilidad", body)
 
+    def test_order_acceptance_is_owned_and_uses_conditional_stock_update(self):
+        body = controller_function(self.source, "admin_actualizar_estado_pedido")
+        self.assertIn("not es_comerciante(user)", body)
+        self.assertIn("db.pedido.negocio_id == negocio.id", body)
+        self.assertIn("db.producto.negocio_id == negocio.id", body)
+        self.assertIn("db.producto.stock >= linea.cantidad", body)
+        self.assertIn("stock=db.producto.stock - linea.cantidad", body)
+        self.assertIn('db.pedido.estado == "pendiente_revision"', body)
+        self.assertIn("db.rollback()", body)
+
     def test_offline_order_queue_is_persistent_and_uses_same_id_for_retries(self):
         sw = SERVICE_WORKER.read_text(encoding="utf-8")
         template = CATALOG_TEMPLATE.read_text(encoding="utf-8")
