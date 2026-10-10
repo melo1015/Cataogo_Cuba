@@ -9,7 +9,7 @@ import os
 # ============================================================
 
 # Modo debug - False en produccion
-DEBUG = os.environ.get("CATALOGO_CUBA_DEBUG", "0") == "1
+DEBUG = os.environ.get("CATALOGO_CUBA_DEBUG", "0") == "1"
 
 # ============================================================
 # BASE DE DATOS - SQLite para facilitar despliegue en Cuba
