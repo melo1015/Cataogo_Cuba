@@ -596,8 +596,8 @@ def admin_dashboard():
 @action.uses(AccionBase, "admin_negocio_form.html")
 def admin_negocio_nuevo():
     user = auth.get_user()
-    if not user or not es_comerciante(user):
-        raise HTTP(403)
+    if not user:
+        redirect(URL("auth", "login"))
 
     if db(db.negocio.usuario_id == user["id"]).count() > 0:
         redirect(URL("catalogo_cuba", "admin"))
