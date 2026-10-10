@@ -83,6 +83,16 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn('db.pedido.estado == "pendiente_revision"', body)
         self.assertIn("db.rollback()", body)
 
+    def test_dashboard_lists_only_own_pending_orders_and_renders_actions(self):
+        body = controller_function(self.source, "admin_dashboard")
+        template = (APP_DIR / "templates" / "admin_dashboard.html").read_text(encoding="utf-8")
+        self.assertIn("db.pedido.negocio_id == negocio.id", body)
+        self.assertIn('db.pedido.estado == "pendiente_revision"', body)
+        self.assertIn("pedidos_pendientes=pedidos_pendientes", body)
+        self.assertIn('data-order-action="aceptado"', template)
+        self.assertIn('data-order-action="rechazado"', template)
+        self.assertIn("credentials:'same-origin'", template)
+        self.assertIn("No hay pedidos pendientes de revisión.", template)
     def test_offline_order_queue_is_persistent_and_uses_same_id_for_retries(self):
         sw = SERVICE_WORKER.read_text(encoding="utf-8")
         template = CATALOG_TEMPLATE.read_text(encoding="utf-8")
