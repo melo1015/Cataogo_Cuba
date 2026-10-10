@@ -8,7 +8,10 @@ import unittest
 from pathlib import Path
 
 
-CONTROLLERS = Path(__file__).resolve().parents[1] / "controllers.py"
+APP_DIR = Path(__file__).resolve().parents[1]
+CONTROLLERS = APP_DIR / "controllers.py"
+SERVICE_WORKER = APP_DIR / "static" / "sw.js"
+CATALOG_TEMPLATE = APP_DIR / "templates" / "catalogo_negocio.html"
 
 
 def controller_function(source, function_name):
@@ -69,6 +72,16 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("Decimal(str(producto.precio or \"0\"))", body)
         self.assertIn("producto.stock or 0", body)
         self.assertIn("Solicitud recibida; el negocio debe confirmar disponibilidad", body)
+
+    def test_offline_order_queue_is_persistent_and_uses_same_id_for_retries(self):
+        sw = SERVICE_WORKER.read_text(encoding="utf-8")
+        template = CATALOG_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("indexedDB.open('catalogocuba-orders-v1', 1)", template)
+        self.assertIn("registration.sync.register('sync-catalogo')", template)
+        self.assertIn("indexedDB.open('catalogocuba-orders-v1', 1)", sw)
+        self.assertIn("JSON.stringify(order.payload)", sw)
+        self.assertIn("SYNC_QUEUE_UPDATED", sw)
+        self.assertIn("client_uuid", template)
 
 
 if __name__ == "__main__":
