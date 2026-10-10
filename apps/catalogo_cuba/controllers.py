@@ -92,10 +92,9 @@ def contexto_base():
 class ContextoBaseFixture(Fixture):
     """Inyecta el contexto comun en las vistas que devuelven diccionarios."""
 
-    def on_success(self, context):
-        output = context.get("output")
-        if isinstance(output, dict):
-            output.update(contexto_base())
+    def on_request(self, context):
+        # Template inyecta este diccionario antes de renderizar la vista.
+        context["template_inject"].update(contexto_base())
 
 
 AccionBase = (ContextoBaseFixture(),)
