@@ -989,29 +989,40 @@ def api_actualizar_stock():
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
+    data = request.json
+    if not isinstance(data, dict):
+        return respuesta_json(exito=False, mensaje="Se esperaba un objeto JSON", codigo=400)
+
     try:
-        data = request.json or {}
-        producto_id = data.get("producto_id")
-        nuevo_stock = data.get("stock")
+        producto_id = int(data.get("producto_id"))
+        nuevo_stock = int(data.get("stock"))
+    except (TypeError, ValueError, OverflowError):
+        return respuesta_json(exito=False, mensaje="Producto o stock no valido", codigo=400)
 
-        negocio = db(db.negocio.usuario_id == user["id"]).select().first()
-        if not negocio:
-            return respuesta_json(exito=False, mensaje="Negocio no encontrado")
+    if producto_id <= 0 or nuevo_stock < 0 or nuevo_stock > 1000000000:
+        return respuesta_json(exito=False, mensaje="El producto o stock esta fuera de rango", codigo=400)
 
-        producto = db(
-            (db.producto.id == producto_id) & (db.producto.negocio_id == negocio.id)
-        ).select().first()
-        if not producto:
-            return respuesta_json(exito=False, mensaje="Producto no encontrado")
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
 
+    producto = db(
+        (db.producto.id == producto_id) &
+        (db.producto.negocio_id == negocio.id)
+    ).select().first()
+    if not producto:
+        return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
+
+    try:
         db(db.producto.id == producto_id).update(
-            stock=int(nuevo_stock), fecha_actualizacion=ahora_cuba(),
+            stock=nuevo_stock, fecha_actualizacion=ahora_cuba(),
         )
         db.commit()
-        return respuesta_json(exito=True, mensaje="Stock actualizado")
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el inventario", codigo=500)
 
+    return respuesta_json(exito=True, mensaje="Stock actualizado")
 
 # ============================================================
 # SUSCRIPCION Y PAGOS (COMERCIANTE)
