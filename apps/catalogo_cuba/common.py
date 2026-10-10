@@ -34,7 +34,11 @@ db = DAL(
 # SESION
 # ============================================================
 
-session = Session(secret=settings.SESSION_SECRET_KEY)
+session = Session(
+    secret=settings.SESSION_SECRET_KEY,
+    expiration=settings.SESSION_EXPIRATION,
+    same_site=settings.SESSION_SAMESITE,
+)
 
 # ============================================================
 # AUTENTICACION
