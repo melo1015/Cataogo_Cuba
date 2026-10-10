@@ -407,6 +407,12 @@
             persistCart();
             setStatus('Pedido guardado localmente. Intentando enviarlo…');
             await renderQueue();
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registration = await navigator.serviceWorker.ready;
+                    if (registration.sync) await registration.sync.register('sync-catalogo');
+                } catch (_) { /* El reintento por evento online sigue disponible. */ }
+            }
             await syncQueue();
         } catch (_) {
             setStatus('No se pudo guardar el pedido localmente. No cierres esta página; copia los datos o inténtalo de nuevo.');
@@ -415,7 +421,10 @@
     window.addEventListener('online', syncQueue);
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.addEventListener('message', event => {
-            if (event.data && event.data.type === 'SYNC_UNAVAILABLE') setStatus(event.data.message);
+            if (event.data && event.data.type === 'SYNC_QUEUE_UPDATED') {
+                setStatus('La cola de pedidos se ha sincronizado en segundo plano.');
+                renderQueue();
+            }
         });
     }
     renderCart();
