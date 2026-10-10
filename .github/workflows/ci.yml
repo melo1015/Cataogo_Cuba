@@ -51,3 +51,79 @@ jobs:
           CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_ci.db"
           PYTHONPATH: apps
         run: python -m unittest discover -s apps/catalogo_cuba/tests -v
+      - name: Smoke-test real HTTP routes and unauthenticated payment protection
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          CATALOGO_CUBA_SECRET: "ci-only-secret-not-for-production"
+          CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_http_ci.db"
+          PYTHONPATH: apps
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = "http://127.0.0.1:8765"
+          server = subprocess.Popen(
+              [
+                  sys.executable, "-m", "py4web", "run",
+                  "--host", "127.0.0.1", "--port", "8765",
+                  "--app_names", "catalogo_cuba", "--server", "wsgiref",
+                  "--quiet", "--watch", "off", "apps",
+              ],
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
+              env=os.environ.copy(),
+          )
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          client = urllib.request.build_opener(NoRedirect)
+          try:
+              last_error = None
+              for _ in range(40):
+                  if server.poll() is not None:
+                      raise RuntimeError("py4web server exited before becoming ready")
+                  try:
+                      response = client.open(base + "/catalogo_cuba/catalogo_cuba", timeout=2)
+                      status = response.getcode()
+                      if status != 200:
+                          raise AssertionError("Public catalog route returned HTTP %s" % status)
+                      break
+                  except (OSError, urllib.error.URLError) as exc:
+                      last_error = exc
+                      time.sleep(0.5)
+              else:
+                  raise RuntimeError("py4web did not become ready: %r" % last_error)
+
+              request = urllib.request.Request(
+                  base + "/catalogo_cuba/catalogo_cuba/superadmin/pago/validar/1",
+                  data=b"estado=validado",
+                  headers={"Content-Type": "application/x-www-form-urlencoded"},
+                  method="POST",
+              )
+              try:
+                  protected_response = client.open(request, timeout=5)
+                  protected_status = protected_response.getcode()
+              except urllib.error.HTTPError as exc:
+                  protected_status = exc.code
+
+              if protected_status not in (302, 303, 401, 403):
+                  raise AssertionError(
+                      "Unauthenticated payment-validation POST was not blocked as expected "
+                      "(HTTP %s)" % protected_status
+                  )
+              print("HTTP smoke test passed: public route HTTP 200; unauthenticated payment POST blocked with HTTP %s" % protected_status)
+          finally:
+              server.terminate()
+              try:
+                  server.wait(timeout=10)
+              except subprocess.TimeoutExpired:
+                  server.kill()
+                  server.wait(timeout=5)
+          PY
