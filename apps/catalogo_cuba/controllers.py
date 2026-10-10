@@ -1130,6 +1130,7 @@ def admin_producto_nuevo():
         imagen = None
         archivo = request.files.get("imagen_principal")
         if archivo and archivo.file:
+            archivo.file.seek(0)
             imagen = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
 
         db(db.producto.id == producto_id).update(
@@ -1178,6 +1179,7 @@ def admin_producto_editar(producto_id):
         imagen = producto.imagen_principal
         archivo = request.files.get("imagen_principal")
         if archivo and archivo.file:
+            archivo.file.seek(0)
             nueva = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
             if nueva:
                 imagen = nueva
