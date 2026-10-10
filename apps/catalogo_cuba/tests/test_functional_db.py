@@ -105,17 +105,35 @@ class DatabaseFlowTests(unittest.TestCase):
                 1,
             )
 
-            # La validacion usa compare-and-set para que solicitudes simultaneas
-            # basadas en el estado antiguo no puedan aplicar el mismo cambio.
+            # Simular el compare-and-set usado por el controlador. Solo la
+            # solicitud que cambia pendiente -> validado puede aplicar el periodo.
+            fecha_fin_inicial = db.suscripcion[subscription_id].fecha_fin
             primer_cambio = db(
                 (db.pago.id == payment_id) & (db.pago.estado == "pendiente")
             ).update(estado="validado")
+            if primer_cambio == 1:
+                db(db.suscripcion.id == subscription_id).update(
+                    estado="activa",
+                    fecha_fin=fecha_fin_inicial + timedelta(days=30),
+                    fecha_pago=now,
+                    monto_pagado="1500.00",
+                    moneda_pago="CUP",
+                )
+
+            # Reintento basado en el estado antiguo: no puede validar ni ampliar
+            # otra vez la suscripcion.
             segundo_cambio = db(
                 (db.pago.id == payment_id) & (db.pago.estado == "pendiente")
             ).update(estado="rechazado")
             self.assertEqual(primer_cambio, 1)
             self.assertEqual(segundo_cambio, 0)
             self.assertEqual(db.pago[payment_id].estado, "validado")
+            suscripcion_final = db.suscripcion[subscription_id]
+            self.assertEqual(suscripcion_final.estado, "activa")
+            self.assertEqual(
+                suscripcion_final.fecha_fin,
+                fecha_fin_inicial + timedelta(days=30),
+            )
             db.commit()
         finally:
             if payment_id:
