@@ -49,7 +49,8 @@ jobs:
               "import catalogo_cuba.settings as s; "
               "assert s.IS_PRODUCTION; "
               "assert not s.DEBUG; "
-              "assert s.SESSION_SECURE; "
+              "assert s.SESSION_EXPIRATION == 604800; "
+              "assert s.SESSION_SAMESITE == 'Lax'; "
               "assert s.AUTH_PASSWORD_MIN_LENGTH >= 10"
           )
           subprocess.run([sys.executable, "-c", check], env=production_env, check=True)
