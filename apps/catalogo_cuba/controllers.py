@@ -103,7 +103,7 @@ class ContextoBaseFixture(Fixture):
         context["template_inject"].update(contexto_base())
 
 
-AccionBase = (ContextoBaseFixture(),)
+AccionBase = (db, ContextoBaseFixture())
 
 
 # --- Preparadores de datos para las vistas --------------------------------
