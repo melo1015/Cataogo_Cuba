@@ -19,13 +19,7 @@ from . import settings
 # En py4web, Auth ya crea automaticamente sus tablas al instanciarse
 # en common.py. NO se debe llamar a auth.define_tables() (no existe en py4web).
 
-# Campos personalizados en auth_user que el resto del sistema espera
-if "fecha_registro" not in db.auth_user.fields:
-    db.auth_user.define_field("fecha_registro", "datetime", default=None)
-
-if "telefono" not in db.auth_user.fields:
-    db.auth_user.define_field("telefono", "string", length=20, default="")
-
+# Los campos personalizados se declaran en Auth(extra_fields=...) en common.py.
 db.auth_user.fecha_registro.writable = False
 db.auth_user.fecha_registro.readable = True
 
