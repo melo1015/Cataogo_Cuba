@@ -364,7 +364,7 @@
     }
     renderAddButtons();
     fetch(grid.dataset.urlApiCatalogo).then(r => r.json()).then(data => {
-        if (data.exito) {
+        if (data.exito && Array.isArray(data.productos)) {
             catalog = data;
             localStorage.setItem('catalogo_' + slug, JSON.stringify(data));
             localStorage.setItem('catalogo_' + slug + '_fecha', String(Date.now()));
@@ -373,6 +373,12 @@
             }
             renderAddButtons();
             renderCart();
+        } else {
+            // Una respuesta offline incompleta no debe reemplazar el catálogo local válido.
+            catalog = getCatalog();
+            renderAddButtons();
+            renderCart();
+            setStatus(catalog ? 'Sin conexión: catálogo guardado disponible; comprueba los datos antes de enviar.' : (data.mensaje || 'Sin conexión y sin catálogo guardado.'));
         }
     }).catch(() => {
         catalog = getCatalog();
