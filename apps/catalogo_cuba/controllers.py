@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from py4web import action, request, response, redirect, URL, HTTP
 from py4web.utils.form import Form, FormStyleBulma
-from py4web.utils.factories import ActionFactory
+from py4web.core import Fixture
 from pydal.validators import IS_EMPTY_OR, IS_IN_DB
 
 from .common import (
@@ -89,7 +89,16 @@ def contexto_base():
 
 
 # ActionFactory con contexto comun; cada accion puede ampliarlo
-AccionBase = ActionFactory(contexto_base, db, session, auth.user)
+class ContextoBaseFixture(Fixture):
+    """Inyecta el contexto comun en las vistas que devuelven diccionarios."""
+
+    def on_success(self, context):
+        output = context.get("output")
+        if isinstance(output, dict):
+            output.update(contexto_base())
+
+
+AccionBase = (ContextoBaseFixture(), db, session, auth.user)
 
 
 # --- Preparadores de datos para las vistas --------------------------------
@@ -239,7 +248,7 @@ def _preparar_pago(p, negocio_nombre=None, usuario_email=None):
 # ============================================================
 
 @action("catalogo_cuba")
-@action.uses(AccionBase, "catalogo_home.html")
+@action.uses(*AccionBase, "catalogo_home.html")
 def catalogo_home():
     negocios_raw = db(
         (db.negocio.activo == True) & (db.negocio.aprobado == True)
@@ -258,7 +267,7 @@ def catalogo_home():
 
 
 @action("catalogo_cuba/negocio/<slug>")
-@action.uses(AccionBase, "catalogo_negocio.html")
+@action.uses(*AccionBase, "catalogo_negocio.html")
 def catalogo_negocio(slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -307,7 +316,7 @@ def catalogo_negocio(slug):
 
 
 @action("catalogo_cuba/negocio/<slug>/categoria/<categoria_slug>")
-@action.uses(AccionBase, "catalogo_negocio.html")
+@action.uses(*AccionBase, "catalogo_negocio.html")
 def catalogo_por_categoria(slug, categoria_slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -354,7 +363,7 @@ def catalogo_por_categoria(slug, categoria_slug):
 
 
 @action("catalogo_cuba/negocio/<slug>/producto/<producto_slug>")
-@action.uses(AccionBase, "catalogo_producto.html")
+@action.uses(*AccionBase, "catalogo_producto.html")
 def catalogo_producto_detalle(slug, producto_slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -419,7 +428,7 @@ def catalogo_producto_detalle(slug, producto_slug):
 # ============================================================
 
 @action("catalogo_cuba/buscar")
-@action.uses(AccionBase, "catalogo_busqueda.html")
+@action.uses(*AccionBase, "catalogo_busqueda.html")
 def catalogo_buscar():
     query_texto = request.query.get("q", "").strip()
     tipo = request.query.get("tipo", "productos")
@@ -585,7 +594,7 @@ def api_producto_detalle(slug, producto_slug):
 # ============================================================
 
 @action("catalogo_cuba/admin")
-@action.uses(AccionBase, "admin_dashboard.html")
+@action.uses(*AccionBase, "admin_dashboard.html")
 def admin_dashboard():
     user = auth.get_user()
     if not user:
@@ -646,7 +655,7 @@ def admin_dashboard():
 # ============================================================
 
 @action("catalogo_cuba/admin/negocio/nuevo", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_negocio_form.html")
+@action.uses(*AccionBase, "admin_negocio_form.html")
 def admin_negocio_nuevo():
     user = auth.get_user()
     if not user:
@@ -706,7 +715,7 @@ def admin_negocio_nuevo():
 
 
 @action("catalogo_cuba/admin/negocio/editar", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_negocio_form.html")
+@action.uses(*AccionBase, "admin_negocio_form.html")
 def admin_negocio_editar():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -746,7 +755,7 @@ def admin_negocio_editar():
 # ============================================================
 
 @action("catalogo_cuba/admin/productos")
-@action.uses(AccionBase, "admin_productos.html")
+@action.uses(*AccionBase, "admin_productos.html")
 def admin_productos():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -795,7 +804,7 @@ def admin_productos():
 
 
 @action("catalogo_cuba/admin/producto/nuevo", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_producto_form.html")
+@action.uses(*AccionBase, "admin_producto_form.html")
 def admin_producto_nuevo():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -843,7 +852,7 @@ def admin_producto_nuevo():
 
 
 @action("catalogo_cuba/admin/producto/editar/<producto_id:int>", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_producto_form.html")
+@action.uses(*AccionBase, "admin_producto_form.html")
 def admin_producto_editar(producto_id):
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -897,7 +906,7 @@ def admin_producto_editar(producto_id):
 # ============================================================
 
 @action("catalogo_cuba/admin/categorias")
-@action.uses(AccionBase, "admin_categorias.html")
+@action.uses(*AccionBase, "admin_categorias.html")
 def admin_categorias():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -927,7 +936,7 @@ def admin_categorias():
 
 
 @action("catalogo_cuba/admin/categoria/nueva", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_categoria_form.html")
+@action.uses(*AccionBase, "admin_categoria_form.html")
 def admin_categoria_nueva():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -956,7 +965,7 @@ def admin_categoria_nueva():
 
 
 @action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_categoria_form.html")
+@action.uses(*AccionBase, "admin_categoria_form.html")
 def admin_categoria_editar(categoria_id):
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -993,7 +1002,7 @@ def admin_categoria_editar(categoria_id):
 # ============================================================
 
 @action("catalogo_cuba/admin/inventario")
-@action.uses(AccionBase, "admin_inventario.html")
+@action.uses(*AccionBase, "admin_inventario.html")
 def admin_inventario():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1081,7 +1090,7 @@ def api_actualizar_stock():
 # ============================================================
 
 @action("catalogo_cuba/admin/suscripcion")
-@action.uses(AccionBase, "admin_suscripcion.html")
+@action.uses(*AccionBase, "admin_suscripcion.html")
 def admin_suscripcion():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1239,7 +1248,7 @@ def admin_realizar_pago():
 # ============================================================
 
 @action("catalogo_cuba/admin/estadisticas")
-@action.uses(AccionBase, "admin_estadisticas.html")
+@action.uses(*AccionBase, "admin_estadisticas.html")
 def admin_estadisticas():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1286,7 +1295,7 @@ def admin_estadisticas():
 # ============================================================
 
 @action("catalogo_cuba/superadmin")
-@action.uses(AccionBase, "superadmin_dashboard.html")
+@action.uses(*AccionBase, "superadmin_dashboard.html")
 def superadmin_dashboard():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1349,7 +1358,7 @@ def superadmin_dashboard():
 # ============================================================
 
 @action("catalogo_cuba/superadmin/negocios")
-@action.uses(AccionBase, "superadmin_negocios.html")
+@action.uses(*AccionBase, "superadmin_negocios.html")
 def superadmin_negocios():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1477,7 +1486,7 @@ def superadmin_toggle_negocio(negocio_id):
 # ============================================================
 
 @action("catalogo_cuba/superadmin/usuarios")
-@action.uses(AccionBase, "superadmin_usuarios.html")
+@action.uses(*AccionBase, "superadmin_usuarios.html")
 def superadmin_usuarios():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1558,7 +1567,7 @@ def superadmin_cambiar_rol(usuario_id):
 # ============================================================
 
 @action("catalogo_cuba/superadmin/suscripciones")
-@action.uses(AccionBase, "superadmin_suscripciones.html")
+@action.uses(*AccionBase, "superadmin_suscripciones.html")
 def superadmin_suscripciones():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1629,7 +1638,7 @@ def superadmin_suscripciones():
 # ============================================================
 
 @action("catalogo_cuba/superadmin/pagos")
-@action.uses(AccionBase, "superadmin_pagos.html")
+@action.uses(*AccionBase, "superadmin_pagos.html")
 def superadmin_pagos():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1779,7 +1788,7 @@ def superadmin_validar_pago(pago_id):
 # ============================================================
 
 @action("catalogo_cuba/superadmin/configuracion")
-@action.uses(AccionBase, "superadmin_configuracion.html")
+@action.uses(*AccionBase, "superadmin_configuracion.html")
 def superadmin_configuracion():
     user = auth.get_user()
     if not es_superadmin(user):
