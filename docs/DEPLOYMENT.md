@@ -53,3 +53,11 @@ SQLite puede servir para una primera instancia de bajo tráfico **con un solo pr
 - El Service Worker puede cachear recursos, pero eso no demuestra sincronización offline completa ni entrega garantizada de pedidos. Probar la cola offline en dispositivos reales antes de anunciar esa función.
 - CI valida sintaxis, importación, esquema y algunas rutas HTTP; no reemplaza pruebas completas de roles, CSRF, concurrencia ni pruebas de penetración.
 - El endpoint de estado/health y las métricas de operación deben configurarse según el proveedor; no se debe marcar el servicio como listo solo porque el proceso arrancó.
+
+
+### Protección adicional de formularios y archivos
+
+- Los formularios `Form` de py4web conservan la protección CSRF por token habilitada; no la desactive.
+- Los endpoints personalizados de escritura autenticados comprueban `Origin` o `Referer` contra `HTTP_HOST`. El proxy inverso debe conservar el host público correcto; valide también este comportamiento detrás del proxy en el despliegue real.
+- Las rutas de edición/creación de negocio, producto y categoría rechazan imágenes mayores de 2 MiB antes de construir el formulario. El optimizador vuelve a comprobar el tamaño y limita dimensiones para reducir el riesgo de imágenes de descompresión excesiva.
+- La aplicación no puede impedir que el servidor HTTP reciba primero el cuerpo de la solicitud; configure también un límite de tamaño de cuerpo en el proxy/servidor web.
