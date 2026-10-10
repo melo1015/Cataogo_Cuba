@@ -81,6 +81,48 @@
         </div>
         [[pass]]
         
+        <!-- Pedidos pendientes -->
+        <section class="card mt-3" id="pedidos-pendientes">
+            <div class="flex-between" style="gap:1rem;flex-wrap:wrap">
+                <h2 style="font-size:1.1rem;margin-bottom:1rem">🛒 Pedidos pendientes</h2>
+                <span class="badge badge-yellow">[[=len(pedidos_pendientes)]] por revisar</span>
+            </div>
+            <div id="orders-feedback" role="status" aria-live="polite" class="text-sm mb-2"></div>
+            [[if pedidos_pendientes:]]
+                [[for p in pedidos_pendientes:]]
+                <article class="card mb-3" style="border:1px solid var(--border-color, #ddd)" data-order-card="[[=p.id]]">
+                    <div class="flex-between" style="gap:1rem;flex-wrap:wrap">
+                        <div><h3>Pedido # [[=p.id]] · [[=p.cliente_nombre]]</h3>
+                        <p class="text-sm">[[=p.fecha_creacion]] · Teléfono: [[=p.cliente_telefono]]</p>
+                        [[if p.direccion_entrega:]]<p class="text-sm">Entrega: [[=p.direccion_entrega]]</p>[[pass]]
+                        [[if p.notas:]]<p class="text-sm">Notas: [[=p.notas]]</p>[[pass]]</div>
+                        <strong>[[=p.total]] [[=p.moneda]]</strong>
+                    </div>
+                    <ul>[[for linea in p.lineas:]]<li>[[=linea.cantidad]] × [[=linea.nombre]] — [[=linea.subtotal]] [[=p.moneda]]</li>[[pass]]</ul>
+                    <div class="flex-between" style="gap:.5rem;flex-wrap:wrap;margin-top:1rem">
+                        <button type="button" class="btn btn-primary" data-order-action="aceptado" data-endpoint="[[=URL('catalogo_cuba', 'admin', 'pedidos', p.id, 'estado')]]">Aceptar y descontar stock</button>
+                        <button type="button" class="btn btn-secondary" data-order-action="rechazado" data-endpoint="[[=URL('catalogo_cuba', 'admin', 'pedidos', p.id, 'estado')]]">Rechazar</button>
+                    </div>
+                </article>[[pass]]
+            [[else:]]<p class="text-sm">No hay pedidos pendientes de revisión.</p>[[pass]]
+        </section>
+        <script>
+        (function () {
+            var section = document.getElementById('pedidos-pendientes');
+            if (!section) return;
+            var feedback = document.getElementById('orders-feedback');
+            section.addEventListener('click', function (event) {
+                var button = event.target.closest('[data-order-action]');
+                if (!button || button.disabled) return;
+                button.disabled = true;
+                feedback.textContent = 'Procesando pedido…';
+                fetch(button.getAttribute('data-endpoint'), {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','Accept':'application/json'}, body:JSON.stringify({estado:button.getAttribute('data-order-action')})})
+                .then(function (response) { return response.json().then(function (data) { if (!response.ok || data.exito === false) throw new Error(data.mensaje || 'No se pudo procesar el pedido.'); return data; }); })
+                .then(function (data) { feedback.textContent = data.mensaje || 'Pedido actualizado.'; var card = button.closest('[data-order-card]'); if (card) card.remove(); if (!section.querySelector('[data-order-card]')) { var empty=document.createElement('p'); empty.className='text-sm'; empty.textContent='No hay pedidos pendientes de revisión.'; section.appendChild(empty); } })
+                .catch(function (error) { feedback.textContent=error.message || 'Error de conexión. Actualiza la página y vuelve a intentarlo.'; button.disabled=false; });
+            });
+        }());
+        </script>
         <!-- Productos mas vistos -->
         <div class="card">
             <h2 style="font-size:1.1rem;margin-bottom:1rem">🔥 Productos mas vistos</h2>
