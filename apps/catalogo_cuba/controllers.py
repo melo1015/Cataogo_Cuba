@@ -34,8 +34,8 @@ def get_client_ip():
 
 def _peticion_mismo_origen():
     """
-    Verifica Origin/Referer para endpoints mutables autenticados por cookie.
-    No sustituye el CSRF de Form: cubre las rutas JSON/form-data personalizadas.
+    Verifica Origin/Referer en endpoints mutables autenticados por cookie.
+    Las Form de py4web conservan su propia proteccion CSRF por token.
     """
     host = (request.environ.get("HTTP_HOST") or "").strip().lower()
     origen = (request.environ.get("HTTP_ORIGIN") or "").strip()
@@ -783,7 +783,7 @@ def admin_actualizar_estado_pedido(pedido_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-"""Acepta o rechaza pedidos; la aceptacion descuenta stock de forma condicional."""
+    """Acepta o rechaza pedidos; la aceptacion descuenta stock de forma condicional."""
     user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
@@ -1370,7 +1370,7 @@ def api_actualizar_stock():
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-user = auth.get_user()
+    user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1458,7 +1458,7 @@ def admin_realizar_pago():
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-user = auth.get_user()
+    user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1785,7 +1785,7 @@ def superadmin_aprobar_negocio(negocio_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-if not es_superadmin():
+    if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     negocio = db.negocio[negocio_id]
@@ -1805,7 +1805,7 @@ def superadmin_toggle_negocio(negocio_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-if not es_superadmin():
+    if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     negocio = db.negocio[negocio_id]
@@ -1882,7 +1882,7 @@ def superadmin_cambiar_rol(usuario_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-if not es_superadmin():
+    if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     nuevo_rol = request.forms.get("rol", "")
@@ -2031,7 +2031,7 @@ def superadmin_validar_pago(pago_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-if not es_superadmin():
+    if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     pago = db.pago[pago_id]
@@ -2155,7 +2155,7 @@ def superadmin_guardar_configuracion():
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-if not es_superadmin():
+    if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     try:
@@ -2215,7 +2215,7 @@ def api_marcar_leida(notificacion_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
 
-user = auth.get_user()
+    user = auth.get_user()
     if not user:
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
