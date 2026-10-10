@@ -980,9 +980,15 @@ def admin_negocio_editar():
                 deletable=False, formstyle=FormStyleBulma)
 
     if form.accepted:
+        slug_base = slugify(form.vars.get("nombre", negocio.nombre)) or "negocio"
+        slug = slug_base
+        contador = 1
+        while db((db.negocio.slug == slug) & (db.negocio.id != negocio.id)).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
         db(db.negocio.id == negocio.id).update(
             fecha_actualizacion=ahora_cuba(),
-            slug=slugify(form.vars.get("nombre", negocio.nombre)),
+            slug=slug,
         )
         db.commit()
         redirect(URL("catalogo_cuba", "admin"))
@@ -1134,8 +1140,20 @@ def admin_producto_editar(producto_id):
             if nueva:
                 imagen = nueva
 
+        slug_base = slugify(form.vars.get("nombre", producto.nombre)) or "producto"
+        slug = slug_base
+        contador = 1
+        while db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.slug == slug) &
+            (db.producto.id != producto_id)
+        ).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
+
         db(db.producto.id == producto_id).update(
-            slug=slugify(form.vars.get("nombre", producto.nombre)),
+            slug=slug,
+            negocio_id=negocio.id,
             imagen_principal=imagen,
             fecha_actualizacion=ahora_cuba(),
         )
@@ -1197,8 +1215,14 @@ def admin_categoria_nueva():
 
     if form.accepted:
         cat_id = form.vars.get("id")
+        slug_base = slugify(form.vars.get("nombre", "")) or "categoria"
+        slug = slug_base
+        contador = 1
+        while db((db.categoria.negocio_id == negocio.id) & (db.categoria.slug == slug)).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
         db(db.categoria.id == cat_id).update(
-            slug=slugify(form.vars.get("nombre", "")),
+            slug=slug,
             negocio_id=negocio.id,
             fecha_creacion=ahora_cuba(),
         )
@@ -1232,9 +1256,17 @@ def admin_categoria_editar(categoria_id):
 
     if form.accepted:
         if not form.deleted:
-            db(db.categoria.id == categoria_id).update(
-                slug=slugify(form.vars.get("nombre", categoria.nombre)),
-            )
+            slug_base = slugify(form.vars.get("nombre", categoria.nombre)) or "categoria"
+            slug = slug_base
+            contador = 1
+            while db(
+                (db.categoria.negocio_id == negocio.id) &
+                (db.categoria.slug == slug) &
+                (db.categoria.id != categoria_id)
+            ).count() > 0:
+                slug = "%s-%d" % (slug_base, contador)
+                contador += 1
+            db(db.categoria.id == categoria_id).update(slug=slug)
             db.commit()
         redirect(URL("catalogo_cuba", "admin", "categorias"))
 
