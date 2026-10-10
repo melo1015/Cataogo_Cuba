@@ -4,7 +4,8 @@ Define todas las acciones/rutas de la aplicacion (py4web)
 """
 import os
 from decimal import Decimal, InvalidOperation
-from datetime import timedelta
+from datetime import datetime, timedelta
+import uuid
 from urllib.parse import quote
 
 from py4web import action, request, response, redirect, URL, HTTP
@@ -592,6 +593,137 @@ def api_producto_detalle(slug, producto_slug):
 
     response.headers["Cache-Control"] = "public, max-age=3600"
     return dict(exito=True, producto=_preparar_producto(producto, negocio, con_detalle=True))
+
+
+# ============================================================
+# API DE PEDIDOS PUBLICOS (aceptacion pendiente del comerciante)
+# ============================================================
+
+@action("catalogo_cuba/api/negocio/<slug>/pedidos", method=["POST"])
+@action.uses(db)
+def api_crear_pedido(slug):
+    """Registra una solicitud de pedido; no confirma ni descuenta inventario."""
+    data = request.json
+    if not isinstance(data, dict):
+        return respuesta_json(exito=False, mensaje="Se esperaba un objeto JSON", codigo=400)
+
+    try:
+        client_uuid = str(uuid.UUID(str(data.get("client_uuid", ""))))
+    except (ValueError, TypeError, AttributeError):
+        return respuesta_json(exito=False, mensaje="Identificador de pedido invalido", codigo=400)
+
+    # Un reintento tras timeout debe devolver el pedido existente, no duplicarlo.
+    existente = db(db.pedido.client_uuid == client_uuid).select().first()
+    if existente:
+        return respuesta_json(
+            exito=True,
+            mensaje="Pedido ya recibido anteriormente",
+            datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
+        )
+
+    nombre = data.get("cliente_nombre")
+    telefono = data.get("cliente_telefono")
+    direccion = data.get("direccion_entrega", "")
+    notas = data.get("notas", "")
+    items = data.get("items")
+    if not isinstance(nombre, str) or not nombre.strip() or len(nombre.strip()) > 120:
+        return respuesta_json(exito=False, mensaje="Nombre del cliente obligatorio (maximo 120 caracteres)", codigo=400)
+    if not isinstance(telefono, str) or not telefono.strip() or len(telefono.strip()) > 40:
+        return respuesta_json(exito=False, mensaje="Telefono obligatorio (maximo 40 caracteres)", codigo=400)
+    if not isinstance(direccion, str) or len(direccion) > 300:
+        return respuesta_json(exito=False, mensaje="Direccion invalida", codigo=400)
+    if not isinstance(notas, str) or len(notas) > 2000:
+        return respuesta_json(exito=False, mensaje="Notas invalidas", codigo=400)
+    if not isinstance(items, list) or not items or len(items) > 50:
+        return respuesta_json(exito=False, mensaje="El pedido debe contener entre 1 y 50 lineas", codigo=400)
+
+    negocio = db(
+        (db.negocio.slug == slug) &
+        (db.negocio.activo == True) &
+        (db.negocio.aprobado == True)
+    ).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
+    if not verificar_suscripcion_activa(negocio.id):
+        return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
+
+    # Consolidar productos repetidos y validar cantidades antes de escribir.
+    cantidades = {}
+    for item in items:
+        if not isinstance(item, dict):
+            return respuesta_json(exito=False, mensaje="Linea de pedido invalida", codigo=400)
+        try:
+            producto_id = int(item.get("producto_id"))
+            cantidad = int(item.get("cantidad"))
+        except (TypeError, ValueError, OverflowError):
+            return respuesta_json(exito=False, mensaje="Producto o cantidad invalida", codigo=400)
+        if producto_id <= 0 or cantidad < 1 or cantidad > 1000:
+            return respuesta_json(exito=False, mensaje="Producto o cantidad fuera de rango", codigo=400)
+        cantidades[producto_id] = cantidades.get(producto_id, 0) + cantidad
+        if cantidades[producto_id] > 1000:
+            return respuesta_json(exito=False, mensaje="Cantidad total fuera de rango", codigo=400)
+
+    lineas = []
+    moneda = None
+    total = Decimal("0.00")
+    for producto_id, cantidad in cantidades.items():
+        producto = db(
+            (db.producto.id == producto_id) &
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.disponible == True)
+        ).select().first()
+        if not producto:
+            return respuesta_json(exito=False, mensaje="Un producto ya no esta disponible", codigo=409)
+        if (producto.stock or 0) < cantidad:
+            return respuesta_json(exito=False, mensaje="Stock insuficiente para: %s" % producto.nombre, codigo=409)
+        if moneda is None:
+            moneda = producto.moneda
+        elif moneda != producto.moneda:
+            return respuesta_json(exito=False, mensaje="Todos los productos deben usar la misma moneda", codigo=400)
+        precio = Decimal(str(producto.precio or "0"))
+        subtotal = (precio * cantidad).quantize(Decimal("0.01"))
+        total += subtotal
+        lineas.append({
+            "producto_id": producto.id,
+            "nombre_producto": producto.nombre,
+            "cantidad": cantidad,
+            "precio_unitario": precio,
+            "subtotal": subtotal,
+        })
+
+    try:
+        pedido_id = db.pedido.insert(
+            client_uuid=client_uuid,
+            negocio_id=negocio.id,
+            cliente_nombre=nombre.strip(),
+            cliente_telefono=telefono.strip(),
+            direccion_entrega=direccion.strip(),
+            notas=notas.strip(),
+            estado="pendiente_revision",
+            moneda=moneda,
+            total=total,
+            fecha_creacion=datetime.utcnow(),
+        )
+        for linea in lineas:
+            db.pedido_item.insert(pedido_id=pedido_id, **linea)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Una carrera entre reintentos puede perder la restriccion UNIQUE.
+        existente = db(db.pedido.client_uuid == client_uuid).select().first()
+        if existente:
+            return respuesta_json(
+                exito=True,
+                mensaje="Pedido ya recibido anteriormente",
+                datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
+            )
+        return respuesta_json(exito=False, mensaje="No se pudo guardar el pedido; puedes reintentar con el mismo identificador", codigo=500)
+
+    return respuesta_json(
+        exito=True,
+        mensaje="Solicitud recibida; el negocio debe confirmar disponibilidad",
+        datos={"pedido_id": pedido_id, "estado": "pendiente_revision", "duplicado": False},
+    )
 
 
 # ============================================================
