@@ -76,7 +76,7 @@ class AuthorizationContractTests(unittest.TestCase):
     def test_offline_order_queue_is_persistent_and_uses_same_id_for_retries(self):
         sw = SERVICE_WORKER.read_text(encoding="utf-8")
         template = CATALOG_TEMPLATE.read_text(encoding="utf-8")
-        self.assertIn("indexedDB.open('catalogocuba-orders-v1', 1)", template)
+        self.assertIn("indexedDB.open(dbName, 1)", template)
         self.assertIn("registration.sync.register('sync-catalogo')", template)
         self.assertIn("indexedDB.open('catalogocuba-orders-v1', 1)", sw)
         self.assertIn("JSON.stringify(order.payload)", sw)
