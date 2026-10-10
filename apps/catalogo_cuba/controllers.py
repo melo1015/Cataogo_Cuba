@@ -513,7 +513,8 @@ def api_catalogo_negocio(slug):
 @action.uses(db, contexto_base)
 def api_producto_detalle(slug, producto_slug):
     negocio = db((db.negocio.slug == slug)).select().first()
-    if not negocio:
+    # No exponer catalogos pendientes de aprobacion o suspendidos.
+    if not negocio or not negocio.activo or not negocio.aprobado:
         return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
 
     producto = db(
@@ -1692,8 +1693,15 @@ def verificar_suscripcion_activa(negocio_id):
 @action("catalogo_cuba/uploads/<filename:path>")
 @action.uses()
 def serve_uploads(filename):
-    ruta = os.path.join(settings.UPLOAD_FOLDER, filename)
-    if not os.path.exists(ruta):
+    # Resolver rutas antes de abrir archivos y garantizar que permanezcan
+    # dentro del directorio de uploads, incluso ante rutas manipuladas.
+    raiz_uploads = os.path.realpath(settings.UPLOAD_FOLDER)
+    ruta = os.path.realpath(os.path.join(raiz_uploads, filename))
+    try:
+        dentro_de_uploads = os.path.commonpath([raiz_uploads, ruta]) == raiz_uploads
+    except ValueError:
+        dentro_de_uploads = False
+    if not dentro_de_uploads or not os.path.isfile(ruta):
         raise HTTP(404, "Archivo no encontrado")
 
     ext = os.path.splitext(filename)[1].lower()
