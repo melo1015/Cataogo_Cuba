@@ -271,24 +271,30 @@ def catalogo_negocio(slug):
     registrar_visita(negocio_id=negocio.id, ip=get_client_ip(),
                      user_agent=request.environ.get("HTTP_USER_AGENT", ""))
 
-    categorias_raw = db(
-        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
-    ).select(orderby=db.categoria.orden)
-    categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
-
-    destacados_raw = db(
-        (db.producto.negocio_id == negocio.id) &
-        (db.producto.disponible == True) &
-        (db.producto.destacado == True)
-    ).select(orderby=~db.producto.fecha_creacion, limitby=(0, 8))
-    destacados = [_preparar_producto(p, negocio) for p in destacados_raw]
-
-    productos_raw = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
-    ).select(orderby=~db.producto.fecha_creacion, limitby=(0, settings.PAGE_SIZE))
-    productos = [_preparar_producto(p, negocio) for p in productos_raw]
-
     suscripcion_activa = verificar_suscripcion_activa(negocio.id)
+    categorias = []
+    destacados = []
+    productos = []
+
+    # Mantener la pagina informativa, pero no exponer el catalogo si la
+    # suscripcion no esta activa.
+    if suscripcion_activa:
+        categorias_raw = db(
+            (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+        ).select(orderby=db.categoria.orden)
+        categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
+
+        destacados_raw = db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.disponible == True) &
+            (db.producto.destacado == True)
+        ).select(orderby=~db.producto.fecha_creacion, limitby=(0, 8))
+        destacados = [_preparar_producto(p, negocio) for p in destacados_raw]
+
+        productos_raw = db(
+            (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
+        ).select(orderby=~db.producto.fecha_creacion, limitby=(0, settings.PAGE_SIZE))
+        productos = [_preparar_producto(p, negocio) for p in productos_raw]
 
     return dict(
         negocio=negocio,
@@ -321,19 +327,28 @@ def catalogo_por_categoria(slug, categoria_slug):
         (db.producto.categoria_id == categoria.id) &
         (db.producto.disponible == True)
     ).select(orderby=~db.producto.fecha_creacion)
-    productos = [_preparar_producto(p, negocio) for p in productos_raw]
+    suscripcion_activa = verificar_suscripcion_activa(negocio.id)
+    productos = []
+    categorias = []
+    if suscripcion_activa:
+        productos_raw = db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.categoria_id == categoria.id) &
+            (db.producto.disponible == True)
+        ).select(orderby=~db.producto.fecha_creacion)
+        productos = [_preparar_producto(p, negocio) for p in productos_raw]
 
-    categorias_raw = db(
-        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
-    ).select(orderby=db.categoria.orden)
-    categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
+        categorias_raw = db(
+            (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+        ).select(orderby=db.categoria.orden)
+        categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
 
     return dict(
         negocio=negocio,
         categorias=categorias,
         destacados=[],
         productos=productos,
-        suscripcion_activa=verificar_suscripcion_activa(negocio.id),
+        suscripcion_activa=suscripcion_activa,
         titulo="%s - %s" % (categoria.nombre, negocio.nombre),
     )
 
@@ -348,8 +363,13 @@ def catalogo_producto_detalle(slug, producto_slug):
     if not negocio:
         raise HTTP(404, "Negocio no encontrado")
 
+    if not verificar_suscripcion_activa(negocio.id):
+        raise HTTP(404, "Producto no encontrado")
+
     producto = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.slug == producto_slug)
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.slug == producto_slug) &
+        (db.producto.disponible == True)
     ).select().first()
     if not producto:
         raise HTTP(404, "Producto no encontrado")
