@@ -187,5 +187,10 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("No se pudo guardar la configuracion", body)
         self.assertNotIn('mensaje="Error: %s" % str(e)', body)
 
+    def test_notification_routes_include_database_fixture(self):
+        for name in ("api_notificaciones", "api_marcar_leida"):
+            marker = "@action.uses(session, auth.user, db)\ndef " + name + "("
+            self.assertIn(marker, self.source)
+
 if __name__ == "__main__":
     unittest.main()
