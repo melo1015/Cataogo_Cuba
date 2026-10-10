@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local databases and migrations generated during development
+*.db
+*.sqlite
+*.sqlite3
+apps/**/storage.db
+apps/**/databases/
+
+# User uploads and generated media
+apps/catalogo_cuba/uploads/
+uploads/
+
+# Test / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+Thumbs.db
