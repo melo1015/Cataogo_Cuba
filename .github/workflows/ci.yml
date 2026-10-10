@@ -36,11 +36,11 @@ jobs:
           import re
 
           template = Path("apps/catalogo_cuba/templates/catalogo_negocio.html").read_text(encoding="utf-8")
-          scripts = re.findall(r"<script(?:\\s[^>]*)?>(.*?)</script\\s*>", template, flags=re.IGNORECASE | re.DOTALL)
+          scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script\s*>", template, flags=re.IGNORECASE | re.DOTALL)
           if not scripts:
               raise SystemExit("No inline script found in catalogo_negocio.html")
-          javascript = "\\n".join(scripts)
-          if re.search(r"\\.innerHTML\\s*=", javascript):
+          javascript = "\n".join(scripts)
+          if re.search(r"\.innerHTML\s*=", javascript):
               raise SystemExit("Unsafe innerHTML assignment found in public catalog template")
           Path("/tmp/catalogo_negocio_inline.js").write_text(javascript, encoding="utf-8")
           PY
