@@ -1673,6 +1673,20 @@ def superadmin_validar_pago(pago_id):
     if estado not in ("validado", "rechazado", "en_proceso", "pendiente"):
         return respuesta_json(exito=False, mensaje="Estado de pago no valido", codigo=400)
 
+    # Un pago validado es terminal: no permitir revertirlo ni revalidarlo
+    # para evitar que la misma transaccion extienda varias veces la suscripcion.
+    if pago.estado == "validado":
+        if estado == "validado":
+            return respuesta_json(
+                exito=True,
+                mensaje="Este pago ya fue validado; no se aplicaron cambios.",
+            )
+        return respuesta_json(
+            exito=False,
+            mensaje="Un pago validado no puede cambiar de estado.",
+            codigo=409,
+        )
+
     # Compare-and-set: solo actualiza si el estado sigue siendo el que leimos.
     # Evita que dos solicitudes concurrentes validen el mismo pago basandose
     # ambas en un estado antiguo.
