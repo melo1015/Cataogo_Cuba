@@ -513,12 +513,21 @@ def api_catalogo_negocio(slug):
 @action("catalogo_cuba/api/negocio/<slug>/producto/<producto_slug>")
 @action.uses(db, contexto_base)
 def api_producto_detalle(slug, producto_slug):
-    negocio = db((db.negocio.slug == slug)).select().first()
+    # El detalle aplica exactamente las mismas reglas de visibilidad que el catalogo.
+    negocio = db(
+        (db.negocio.slug == slug) &
+        (db.negocio.activo == True) &
+        (db.negocio.aprobado == True)
+    ).select().first()
     if not negocio:
-        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
+        return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
+    if not verificar_suscripcion_activa(negocio.id):
+        return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
 
     producto = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.slug == producto_slug)
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.slug == producto_slug) &
+        (db.producto.disponible == True)
     ).select().first()
     if not producto:
         return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
@@ -987,25 +996,35 @@ def api_actualizar_stock():
     try:
         data = request.json or {}
         producto_id = data.get("producto_id")
-        nuevo_stock = data.get("stock")
+        nuevo_stock_raw = data.get("stock")
+
+        if isinstance(nuevo_stock_raw, bool) or nuevo_stock_raw is None:
+            return respuesta_json(exito=False, mensaje="Cantidad de stock no valida", codigo=400)
+        try:
+            nuevo_stock = int(nuevo_stock_raw)
+        except (TypeError, ValueError, OverflowError):
+            return respuesta_json(exito=False, mensaje="Cantidad de stock no valida", codigo=400)
+        if str(nuevo_stock) != str(nuevo_stock_raw).strip() or not 0 <= nuevo_stock <= 1000000:
+            return respuesta_json(exito=False, mensaje="El stock debe ser un entero entre 0 y 1000000", codigo=400)
 
         negocio = db(db.negocio.usuario_id == user["id"]).select().first()
         if not negocio:
-            return respuesta_json(exito=False, mensaje="Negocio no encontrado")
+            return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
 
         producto = db(
             (db.producto.id == producto_id) & (db.producto.negocio_id == negocio.id)
         ).select().first()
         if not producto:
-            return respuesta_json(exito=False, mensaje="Producto no encontrado")
+            return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
 
         db(db.producto.id == producto_id).update(
-            stock=int(nuevo_stock), fecha_actualizacion=ahora_cuba(),
+            stock=nuevo_stock, fecha_actualizacion=ahora_cuba(),
         )
         db.commit()
         return respuesta_json(exito=True, mensaje="Stock actualizado")
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el stock", codigo=400)
 
 
 # ============================================================
