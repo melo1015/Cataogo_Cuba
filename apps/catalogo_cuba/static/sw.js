@@ -191,14 +191,13 @@ async function servirCatalogoOffline(request) {
     // Retornar una respuesta que el frontend JS manejara
     // El frontend ya deberia tener los datos en localStorage
     return new Response(
-        JSON.stringify({ 
-            exito: true, 
+        JSON.stringify({
+            exito: false,
             offline: true,
             negocio_slug: negocioSlug,
-            mensaje: 'Modo offline - usando datos locales',
-            source: 'service_worker_cache_check'
+            mensaje: 'Sin conexión y sin copia del catálogo en la caché de red.'
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
     );
 }
 
