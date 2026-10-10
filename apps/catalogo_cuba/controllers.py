@@ -658,11 +658,18 @@ def api_crear_pedido(slug):
     for item in items:
         if not isinstance(item, dict):
             return respuesta_json(exito=False, mensaje="Linea de pedido invalida", codigo=400)
+        producto_id_raw = item.get("producto_id")
+        cantidad_raw = item.get("cantidad")
+        if isinstance(producto_id_raw, bool) or isinstance(cantidad_raw, bool):
+            return respuesta_json(exito=False, mensaje="Producto o cantidad invalida", codigo=400)
         try:
-            producto_id = int(item.get("producto_id"))
-            cantidad = int(item.get("cantidad"))
+            producto_id = int(producto_id_raw)
+            cantidad = int(cantidad_raw)
         except (TypeError, ValueError, OverflowError):
             return respuesta_json(exito=False, mensaje="Producto o cantidad invalida", codigo=400)
+        if (str(producto_id) != str(producto_id_raw).strip() or
+                str(cantidad) != str(cantidad_raw).strip()):
+            return respuesta_json(exito=False, mensaje="Producto o cantidad debe ser un entero", codigo=400)
         if producto_id <= 0 or cantidad < 1 or cantidad > 1000:
             return respuesta_json(exito=False, mensaje="Producto o cantidad fuera de rango", codigo=400)
         cantidades[producto_id] = cantidades.get(producto_id, 0) + cantidad
@@ -1292,13 +1299,20 @@ def api_actualizar_stock():
     if not isinstance(data, dict):
         return respuesta_json(exito=False, mensaje="Se esperaba un objeto JSON", codigo=400)
 
+    producto_id_raw = data.get("producto_id")
+    stock_raw = data.get("stock")
+    # No aceptar booleanos ni truncar decimales con int(1.5) -> 1.
+    if isinstance(producto_id_raw, bool) or isinstance(stock_raw, bool):
+        return respuesta_json(exito=False, mensaje="Producto o stock no valido", codigo=400)
     try:
-        producto_id = int(data.get("producto_id"))
-        nuevo_stock = int(data.get("stock"))
+        producto_id = int(producto_id_raw)
+        nuevo_stock = int(stock_raw)
     except (TypeError, ValueError, OverflowError):
         return respuesta_json(exito=False, mensaje="Producto o stock no valido", codigo=400)
-
-    if producto_id <= 0 or nuevo_stock < 0 or nuevo_stock > 1000000000:
+    if (str(producto_id) != str(producto_id_raw).strip() or
+            str(nuevo_stock) != str(stock_raw).strip()):
+        return respuesta_json(exito=False, mensaje="Producto o stock debe ser un entero", codigo=400)
+    if producto_id <= 0 or nuevo_stock < 0 or nuevo_stock > 1000000:
         return respuesta_json(exito=False, mensaje="El producto o stock esta fuera de rango", codigo=400)
 
     negocio = db(db.negocio.usuario_id == user["id"]).select().first()
@@ -2147,13 +2161,16 @@ def serve_uploads(filename):
     if not dentro_de_uploads or not os.path.isfile(ruta):
         raise HTTP(404, "Archivo no encontrado")
 
-    ext = os.path.splitext(filename)[1].lower()
+    ext = os.path.splitext(ruta)[1].lower()
     content_type = {
         ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
-    }.get(ext, "application/octet-stream")
+    }.get(ext)
+    if not content_type:
+        raise HTTP(404, "Archivo no encontrado")
 
     response.headers["Content-Type"] = content_type
+    response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "public, max-age=86400"
     with open(ruta, "rb") as f:
         return f.read()
