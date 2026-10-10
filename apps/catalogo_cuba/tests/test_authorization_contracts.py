@@ -104,5 +104,16 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("client_uuid", template)
 
 
+    def test_public_search_hides_businesses_without_active_subscription(self):
+        body = controller_function(self.source, "catalogo_buscar")
+        self.assertIn("if not verificar_suscripcion_activa(negocio.id):", body)
+        self.assertIn("if verificar_suscripcion_activa(n.id)", body)
+
+    def test_offline_catalog_response_cannot_overwrite_local_catalog_with_empty_data(self):
+        template = CATALOG_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("data.exito && Array.isArray(data.productos)", template)
+        self.assertIn("catalog = getCatalog();", template)
+
+
 if __name__ == "__main__":
     unittest.main()
