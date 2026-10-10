@@ -489,9 +489,30 @@ def api_catalogo_negocio(slug):
         'imagen': c.imagen,
     } for c in categorias_raw]
 
-    productos_raw = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
-    ).select(orderby=~db.producto.fecha_creacion)
+    productos_query = (
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.disponible == True)
+    )
+    total_productos = db(productos_query).count()
+
+    # Sin parametro page se devuelve el catalogo completo para la cache local.
+    # Con page se entrega una pagina para el boton "Cargar mas".
+    pagina_raw = request.query.get("page")
+    if pagina_raw is not None:
+        try:
+            pagina = max(1, int(pagina_raw))
+        except (TypeError, ValueError):
+            return respuesta_json(exito=False, mensaje="Pagina invalida", codigo=400)
+        inicio = (pagina - 1) * settings.PAGE_SIZE
+        productos_raw = db(productos_query).select(
+            orderby=~db.producto.fecha_creacion,
+            limitby=(inicio, inicio + settings.PAGE_SIZE),
+        )
+    else:
+        pagina = 1
+        productos_raw = db(productos_query).select(
+            orderby=~db.producto.fecha_creacion
+        )
     productos = [_preparar_producto(p, negocio) for p in productos_raw]
 
     response.headers["Cache-Control"] = "public, max-age=3600"
@@ -509,7 +530,9 @@ def api_catalogo_negocio(slug):
         },
         categorias=categorias,
         productos=productos,
-        total_productos=len(productos),
+        total_productos=total_productos,
+        pagina=pagina,
+        total_paginas=(total_productos + settings.PAGE_SIZE - 1) // settings.PAGE_SIZE,
     )
 
 
