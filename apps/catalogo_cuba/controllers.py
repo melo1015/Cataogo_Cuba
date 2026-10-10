@@ -1664,7 +1664,7 @@ def superadmin_validar_pago(pago_id):
 
     pago = db.pago[pago_id]
     if not pago:
-        return respuesta_json(exito=False, mensaje="Pago no encontrado")
+        return respuesta_json(exito=False, mensaje="Pago no encontrado", codigo=404)
 
     estado = request.forms.get("estado", "validado")
     notas = request.forms.get("notas", "")
@@ -1673,35 +1673,72 @@ def superadmin_validar_pago(pago_id):
     if estado not in ("validado", "rechazado", "en_proceso", "pendiente"):
         return respuesta_json(exito=False, mensaje="Estado de pago no valido", codigo=400)
 
-    # Una validacion confirmada no debe volver a extender la suscripcion.
-    if pago.estado == "validado":
-        return respuesta_json(exito=True, mensaje="Este pago ya fue validado; no se aplicaron cambios.")
+    # Compare-and-set: solo actualiza si el estado sigue siendo el que leimos.
+    # Evita que dos solicitudes concurrentes validen el mismo pago basandose
+    # ambas en un estado antiguo.
+    ahora = ahora_cuba()
+    try:
+        actualizado = db(
+            (db.pago.id == pago_id) & (db.pago.estado == pago.estado)
+        ).update(
+            estado=estado,
+            fecha_validacion=ahora,
+            validado_por=user["id"] if user else None,
+            notas_validacion=notas,
+        )
 
-    db(db.pago.id == pago_id).update(
-        estado=estado, fecha_validacion=ahora_cuba(),
-        validado_por=user["id"] if user else None,
-        notas_validacion=notas,
-    )
-    db.commit()
+        if actualizado != 1:
+            db.rollback()
+            pago_actual = db.pago[pago_id]
+            if pago_actual and pago_actual.estado == "validado":
+                return respuesta_json(
+                    exito=True,
+                    mensaje="Este pago ya fue validado; no se aplicaron cambios.",
+                )
+            return respuesta_json(
+                exito=False,
+                mensaje="El pago cambio mientras se procesaba. Recarga e intenta nuevamente.",
+                codigo=409,
+            )
 
-    if estado == "validado":
-        suscripcion = db.suscripcion[pago.suscripcion_id]
-        if suscripcion:
-            base = max(suscripcion.fecha_fin, ahora_cuba().date()) if suscripcion.fecha_fin else ahora_cuba().date()
+        if estado == "validado":
+            suscripcion = db.suscripcion[pago.suscripcion_id]
+            if not suscripcion:
+                db.rollback()
+                return respuesta_json(
+                    exito=False,
+                    mensaje="No se encontro la suscripcion asociada al pago",
+                    codigo=409,
+                )
+
+            fecha_actual = ahora.date()
+            base = max(suscripcion.fecha_fin, fecha_actual) if suscripcion.fecha_fin else fecha_actual
             nueva_fecha_fin = base + timedelta(days=30)
             db(db.suscripcion.id == pago.suscripcion_id).update(
-                estado="activa", fecha_fin=nueva_fecha_fin,
-                fecha_pago=ahora_cuba(),
-                monto_pagado=pago.monto, moneda_pago=pago.moneda,
+                estado="activa",
+                fecha_fin=nueva_fecha_fin,
+                fecha_pago=ahora,
+                monto_pagado=pago.monto,
+                moneda_pago=pago.moneda,
             )
             db.notificacion.insert(
-                usuario_id=pago.usuario_id, tipo="pago_validado",
+                usuario_id=pago.usuario_id,
+                tipo="pago_validado",
                 titulo="Pago validado",
                 mensaje="Su pago de %s %s ha sido validado. Su suscripcion esta activa hasta %s." % (
                     pago.monto, pago.moneda, nueva_fecha_fin.strftime('%d/%m/%Y')),
-                fecha_creacion=ahora_cuba(),
+                fecha_creacion=ahora,
             )
-            db.commit()
+
+        # Pago, suscripcion y notificacion se confirman en una sola transaccion.
+        db.commit()
+    except Exception:
+        db.rollback()
+        return respuesta_json(
+            exito=False,
+            mensaje="No se pudo procesar la validacion del pago. Intenta nuevamente.",
+            codigo=500,
+        )
 
     return respuesta_json(exito=True, mensaje="Pago %s correctamente" % estado)
 
