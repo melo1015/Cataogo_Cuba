@@ -2190,7 +2190,7 @@ def superadmin_guardar_configuracion():
 # ============================================================
 
 @action("catalogo_cuba/api/notificaciones")
-@action.uses(session, auth.user)
+@action.uses(session, auth.user, db)
 def api_notificaciones():
     user = auth.get_user()
     if not user:
@@ -2214,7 +2214,7 @@ def api_notificaciones():
 
 
 @action("catalogo_cuba/api/notificacion/leer/<notificacion_id:int>", method=["POST"])
-@action.uses(session, auth.user)
+@action.uses(session, auth.user, db)
 def api_marcar_leida(notificacion_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
