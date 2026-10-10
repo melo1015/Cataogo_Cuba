@@ -612,15 +612,6 @@ def api_crear_pedido(slug):
     except (ValueError, TypeError, AttributeError):
         return respuesta_json(exito=False, mensaje="Identificador de pedido invalido", codigo=400)
 
-    # Un reintento tras timeout debe devolver el pedido existente, no duplicarlo.
-    existente = db(db.pedido.client_uuid == client_uuid).select().first()
-    if existente:
-        return respuesta_json(
-            exito=True,
-            mensaje="Pedido ya recibido anteriormente",
-            datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
-        )
-
     nombre = data.get("cliente_nombre")
     telefono = data.get("cliente_telefono")
     direccion = data.get("direccion_entrega", "")
@@ -646,6 +637,17 @@ def api_crear_pedido(slug):
         return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
     if not verificar_suscripcion_activa(negocio.id):
         return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
+
+    # Idempotencia dentro del negocio correcto; un UUID ajeno no revela su pedido.
+    existente = db(db.pedido.client_uuid == client_uuid).select().first()
+    if existente:
+        if existente.negocio_id != negocio.id:
+            return respuesta_json(exito=False, mensaje="Identificador ya utilizado", codigo=409)
+        return respuesta_json(
+            exito=True,
+            mensaje="Pedido ya recibido anteriormente",
+            datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
+        )
 
     # Consolidar productos repetidos y validar cantidades antes de escribir.
     cantidades = {}
