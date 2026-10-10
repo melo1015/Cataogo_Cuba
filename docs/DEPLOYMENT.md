@@ -19,7 +19,6 @@ Configurar como variables de entorno en el panel del proveedor; no escribir secr
 | `CATALOGO_CUBA_ENV` | `production` |
 | `CATALOGO_CUBA_DEBUG` | `0` |
 | `CATALOGO_CUBA_SECRET` | Secreto aleatorio largo y único |
-| `CATALOGO_CUBA_SECURE` | `1` |
 | `CATALOGO_CUBA_DB_URI` | URI de una base de datos persistente |
 | `CATALOGO_CUBA_UPLOAD_FOLDER` | Ruta persistente para uploads |
 
