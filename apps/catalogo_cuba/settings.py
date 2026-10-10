@@ -33,10 +33,11 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 
 # Clave secreta para sesiones - CAMBIAR EN PRODUCCION
 # En produccion, define la variable de entorno CATALOGO_CUBA_SECRET.
-SESSION_SECRET_KEY = os.environ.get(
-    "CATALOGO_CUBA_SECRET",
-    "catalogo-cuba-dev-secret-key-cambiar-en-produccion"
-)
+SESSION_SECRET_KEY = os.environ.get("CATALOGO_CUBA_SECRET")
+if not SESSION_SECRET_KEY:
+    if not DEBUG:
+        raise RuntimeError("Define CATALOGO_CUBA_SECRET antes de iniciar en modo seguro.")
+    SESSION_SECRET_KEY = "catalogo-cuba-local-development-only"
 
 # Configuracion de sesiones
 SESSION_TYPE = "cookie"
