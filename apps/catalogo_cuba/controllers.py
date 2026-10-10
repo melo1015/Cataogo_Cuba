@@ -3,6 +3,7 @@ Controladores - CatalogoCuba
 Define todas las acciones/rutas de la aplicacion (py4web)
 """
 import os
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -1055,50 +1056,103 @@ def admin_realizar_pago():
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
+
+    # El cliente nunca decide libremente el precio: se calcula desde la tarifa del servidor.
+    metodo = (request.forms.get("metodo_pago") or "").strip().lower()
+    moneda = (request.forms.get("moneda") or "CUP").strip().upper()
+    referencia = (request.forms.get("referencia") or "").strip()
+
+    if metodo not in ("transfermovil", "presencial", "usdt"):
+        return respuesta_json(exito=False, mensaje="Metodo de pago no valido", codigo=400)
+
+    moneda_esperada = "USDT" if metodo == "usdt" else "CUP"
+    monto_esperado = (
+        Decimal(str(settings.COSTO_SUSCRIPCION_MENSUAL_USDT))
+        if moneda_esperada == "USDT"
+        else Decimal(str(settings.COSTO_SUSCRIPCION_MENSUAL_CUP))
+    )
+    if moneda != moneda_esperada:
+        return respuesta_json(
+            exito=False,
+            mensaje="La moneda no corresponde al metodo de pago seleccionado",
+            codigo=400,
+        )
+
     try:
-        negocio = db(db.negocio.usuario_id == user["id"]).select().first()
-        if not negocio:
-            return respuesta_json(exito=False, mensaje="Negocio no encontrado")
+        monto_recibido = Decimal((request.forms.get("monto") or "").strip())
+    except (InvalidOperation, AttributeError):
+        return respuesta_json(exito=False, mensaje="Monto no valido", codigo=400)
 
-        metodo = request.forms.get("metodo_pago")
-        monto = request.forms.get("monto")
-        moneda = request.forms.get("moneda", "CUP")
-        referencia = request.forms.get("referencia", "")
+    if not monto_recibido.is_finite() or monto_recibido != monto_esperado:
+        return respuesta_json(
+            exito=False,
+            mensaje="El importe debe coincidir con la tarifa vigente: %s %s"
+                    % (monto_esperado, moneda_esperada),
+            codigo=400,
+        )
 
-        suscripcion = db(
-            (db.suscripcion.negocio_id == negocio.id) &
-            db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])
-        ).select(orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)).first()
+    if len(referencia) > 100:
+        return respuesta_json(exito=False, mensaje="La referencia supera 100 caracteres", codigo=400)
+    if metodo in ("transfermovil", "usdt") and not referencia:
+        return respuesta_json(
+            exito=False,
+            mensaje="Debes indicar la referencia o hash de la transaccion",
+            codigo=400,
+        )
+    if referencia and db(
+        (db.pago.referencia == referencia) &
+        (db.pago.metodo_pago == metodo) &
+        (db.pago.estado.belongs(["pendiente", "en_proceso", "validado"]))
+    ).count() > 0:
+        return respuesta_json(
+            exito=False,
+            mensaje="Esta referencia ya esta registrada",
+            codigo=409,
+        )
 
+    suscripcion = db(
+        (db.suscripcion.negocio_id == negocio.id) &
+        db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])
+    ).select(orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)).first()
+
+    ahora = ahora_cuba()
+    try:
         if not suscripcion:
             suscripcion_id = db.suscripcion.insert(
                 negocio_id=negocio.id, usuario_id=user["id"],
-                fecha_inicio=ahora_cuba().date(),
-                fecha_fin=(ahora_cuba() + timedelta(days=30)).date(),
+                fecha_inicio=ahora.date(),
+                fecha_fin=(ahora + timedelta(days=30)).date(),
                 estado="pendiente", metodo_pago=metodo,
-                fecha_creacion=ahora_cuba(),
+                fecha_creacion=ahora,
             )
         else:
             suscripcion_id = suscripcion.id
+
+        pago_id = db.pago.insert(
+            suscripcion_id=suscripcion_id, negocio_id=negocio.id,
+            usuario_id=user["id"], monto=str(monto_esperado), moneda=moneda,
+            metodo_pago=metodo, estado="pendiente", referencia=referencia,
+            fecha_solicitud=ahora,
+        )
+        if suscripcion:
             db(db.suscripcion.id == suscripcion_id).update(
                 estado="pendiente", metodo_pago=metodo,
             )
         db.commit()
-
-        pago_id = db.pago.insert(
-            suscripcion_id=suscripcion_id, negocio_id=negocio.id,
-            usuario_id=user["id"], monto=float(monto), moneda=moneda,
-            metodo_pago=metodo, estado="pendiente", referencia=referencia,
-            fecha_solicitud=ahora_cuba(),
+    except Exception:
+        db.rollback()
+        return respuesta_json(
+            exito=False, mensaje="No se pudo registrar el pago. Intenta nuevamente.", codigo=500
         )
-        db.commit()
 
-        return respuesta_json(exito=True,
-                              mensaje="Pago registrado correctamente. Pendiente de validacion.",
-                              datos={"pago_id": pago_id})
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
-
+    return respuesta_json(
+        exito=True,
+        mensaje="Pago registrado correctamente. Pendiente de validacion manual.",
+        datos={"pago_id": pago_id},
+    )
 
 # ============================================================
 # ESTADISTICAS (COMERCIANTE)
