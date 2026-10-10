@@ -496,7 +496,7 @@ def catalogo_buscar():
 # ============================================================
 
 @action("catalogo_cuba/api/negocio/<slug>/catalogo")
-@action.uses(db, contexto_base)
+@action.uses(contexto_base)
 def api_catalogo_negocio(slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -565,7 +565,7 @@ def api_catalogo_negocio(slug):
 
 
 @action("catalogo_cuba/api/negocio/<slug>/producto/<producto_slug>")
-@action.uses(db, contexto_base)
+@action.uses(contexto_base)
 def api_producto_detalle(slug, producto_slug):
     negocio = db((db.negocio.slug == slug)).select().first()
     # No exponer catalogos pendientes de aprobacion o suspendidos.
@@ -1043,7 +1043,7 @@ def admin_inventario():
 
 
 @action("catalogo_cuba/api/inventario/actualizar", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, contexto_base)
 def api_actualizar_stock():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1121,7 +1121,7 @@ def admin_suscripcion():
 
 
 @action("catalogo_cuba/admin/pago/realizar", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, contexto_base)
 def admin_realizar_pago():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1445,7 +1445,7 @@ def superadmin_negocios():
 
 
 @action("catalogo_cuba/superadmin/negocio/aprobar/<negocio_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, contexto_base)
 def superadmin_aprobar_negocio(negocio_id):
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
@@ -1462,7 +1462,7 @@ def superadmin_aprobar_negocio(negocio_id):
 
 
 @action("catalogo_cuba/superadmin/negocio/toggle/<negocio_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, contexto_base)
 def superadmin_toggle_negocio(negocio_id):
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
@@ -1536,7 +1536,7 @@ def superadmin_usuarios():
 
 
 @action("catalogo_cuba/superadmin/usuario/cambiar-rol/<usuario_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, contexto_base)
 def superadmin_cambiar_rol(usuario_id):
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
@@ -1682,7 +1682,7 @@ def superadmin_pagos():
 
 
 @action("catalogo_cuba/superadmin/pago/validar/<pago_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, contexto_base)
 def superadmin_validar_pago(pago_id):
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
@@ -1803,7 +1803,7 @@ def superadmin_configuracion():
 
 
 @action("catalogo_cuba/superadmin/configuracion/guardar", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, contexto_base)
 def superadmin_guardar_configuracion():
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
@@ -1836,7 +1836,7 @@ def superadmin_guardar_configuracion():
 # ============================================================
 
 @action("catalogo_cuba/api/notificaciones")
-@action.uses(db, session, auth.user)
+@action.uses(session, auth.user)
 def api_notificaciones():
     user = auth.get_user()
     if not user:
@@ -1860,7 +1860,7 @@ def api_notificaciones():
 
 
 @action("catalogo_cuba/api/notificacion/leer/<notificacion_id:int>", method=["POST"])
-@action.uses(db, session, auth.user)
+@action.uses(session, auth.user)
 def api_marcar_leida(notificacion_id):
     user = auth.get_user()
     if not user:
