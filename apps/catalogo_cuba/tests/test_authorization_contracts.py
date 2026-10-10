@@ -115,5 +115,23 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("catalog = getCatalog();", template)
 
 
+    def test_inventory_rejects_boolean_and_fractional_quantities(self):
+        body = controller_function(self.source, "api_actualizar_stock")
+        self.assertIn("isinstance(producto_id_raw, bool)", body)
+        self.assertIn("isinstance(stock_raw, bool)", body)
+        self.assertIn("str(nuevo_stock) != str(stock_raw).strip()", body)
+
+    def test_public_order_rejects_boolean_and_fractional_quantities(self):
+        body = controller_function(self.source, "api_crear_pedido")
+        self.assertIn("isinstance(producto_id_raw, bool)", body)
+        self.assertIn("isinstance(cantidad_raw, bool)", body)
+        self.assertIn("str(cantidad) != str(cantidad_raw).strip()", body)
+
+    def test_uploads_allow_only_image_content_types_and_set_nosniff(self):
+        body = controller_function(self.source, "serve_uploads")
+        self.assertIn('if not content_type:', body)
+        self.assertIn('response.headers["X-Content-Type-Options"] = "nosniff"', body)
+
+
 if __name__ == "__main__":
     unittest.main()
