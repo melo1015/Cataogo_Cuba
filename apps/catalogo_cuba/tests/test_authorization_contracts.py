@@ -178,6 +178,7 @@ class AuthorizationContractTests(unittest.TestCase):
         body = controller_function(self.source, "superadmin_cambiar_rol")
         self.assertIn("db.commit()", body)
         self.assertIn("db.rollback()", body)
+        self.assertIn("roles_actuales = roles_tags.get(usuario_id) or []", body)
         self.assertIn("No se pudo actualizar el rol", body)
 
     def test_configuration_errors_are_rolled_back_without_leaking_details(self):
