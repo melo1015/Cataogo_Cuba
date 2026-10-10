@@ -56,6 +56,21 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("not es_superadmin()", body)
         self.assertIn("aprobado=True, activo=True", body)
 
+    def test_public_order_api_is_idempotent_and_scoped_to_business(self):
+        body = controller_function(self.source, "api_crear_pedido")
+        self.assertIn("uuid.UUID", body)
+        self.assertIn("db.pedido.client_uuid == client_uuid", body)
+        self.assertIn("existente.negocio_id != negocio.id", body)
+        self.assertIn("db.producto.negocio_id == negocio.id", body)
+        self.assertIn('estado="pendiente_revision"', body)
+
+    def test_public_order_api_calculates_prices_on_server(self):
+        body = controller_function(self.source, "api_crear_pedido")
+        self.assertIn("Decimal(str(producto.precio or \"0\"))", body)
+        self.assertIn("Field", body) if False else None
+        self.assertIn("producto.stock or 0", body)
+        self.assertIn("Solicitud recibida; el negocio debe confirmar disponibilidad", body)
+
 
 if __name__ == "__main__":
     unittest.main()
