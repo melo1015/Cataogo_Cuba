@@ -457,6 +457,9 @@ def catalogo_buscar():
             for r in rows:
                 producto = r.producto
                 negocio = r.negocio
+                # Los negocios sin suscripción vigente no deben aparecer en la búsqueda pública.
+                if not verificar_suscripcion_activa(negocio.id):
+                    continue
                 resultados.append({
                     'producto': {
                         'id': producto.id,
@@ -484,7 +487,7 @@ def catalogo_buscar():
                 'slug': n.slug,
                 'descripcion': n.descripcion,
                 'logo': n.logo,
-            } for n in neg_raw]
+            } for n in neg_raw if verificar_suscripcion_activa(n.id)]
             total_negocios = len(negocios)
 
     return dict(
