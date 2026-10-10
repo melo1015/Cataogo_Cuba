@@ -133,5 +133,16 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn('response.headers["X-Content-Type-Options"] = "nosniff"', body)
 
 
+    def test_edit_routes_avoid_slug_collisions(self):
+        business = controller_function(self.source, "admin_negocio_editar")
+        product = controller_function(self.source, "admin_producto_editar")
+        category_create = controller_function(self.source, "admin_categoria_nueva")
+        category_edit = controller_function(self.source, "admin_categoria_editar")
+        self.assertIn("db.negocio.id != negocio.id", business)
+        self.assertIn("db.producto.id != producto_id", product)
+        self.assertIn("db.categoria.slug == slug", category_create)
+        self.assertIn("db.categoria.id != categoria_id", category_edit)
+
+
 if __name__ == "__main__":
     unittest.main()
