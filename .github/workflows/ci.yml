@@ -29,8 +29,9 @@ jobs:
         run: python -c "import catalogo_cuba; print('CatalogoCuba import OK')"
       - name: Check service worker JavaScript syntax
         run: node --check apps/catalogo_cuba/static/sw.js
-      - name: Run application schema smoke tests
+      - name: Run application schema and database-flow tests
         env:
           CATALOGO_CUBA_DEBUG: "1"
+          CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_ci.db"
           PYTHONPATH: apps
         run: python -m unittest discover -s apps/catalogo_cuba/tests -v
