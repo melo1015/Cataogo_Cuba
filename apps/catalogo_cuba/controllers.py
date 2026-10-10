@@ -1165,11 +1165,18 @@ def admin_realizar_pago():
             mensaje="Debes indicar la referencia o hash de la transaccion",
             codigo=400,
         )
-    if referencia and db(
-        (db.pago.referencia == referencia) &
-        (db.pago.metodo_pago == metodo) &
-        (db.pago.estado.belongs(["pendiente", "en_proceso", "validado"]))
-    ).count() > 0:
+    # Normalizar la referencia para bloquear variaciones por mayusculas/minusculas.
+    # La restriccion UNIQUE de la base de datos es la proteccion atomica frente
+    # a dos solicitudes concurrentes; esta consulta previa solo mejora el mensaje.
+    referencia_unica = ("%s:%s" % (metodo, referencia.casefold())) if referencia else None
+    if referencia and (
+        db(db.pago.referencia_unica == referencia_unica).count() > 0 or
+        db(
+            (db.pago.referencia == referencia) &
+            (db.pago.metodo_pago == metodo) &
+            (db.pago.estado.belongs(["pendiente", "en_proceso", "validado"]))
+        ).count() > 0
+    ):
         return respuesta_json(
             exito=False,
             mensaje="Esta referencia ya esta registrada",
@@ -1198,6 +1205,7 @@ def admin_realizar_pago():
             suscripcion_id=suscripcion_id, negocio_id=negocio.id,
             usuario_id=user["id"], monto=str(monto_esperado), moneda=moneda,
             metodo_pago=metodo, estado="pendiente", referencia=referencia,
+            referencia_unica=referencia_unica,
             fecha_solicitud=ahora,
         )
         if suscripcion:
@@ -1207,6 +1215,15 @@ def admin_realizar_pago():
         db.commit()
     except Exception:
         db.rollback()
+        # Si la restriccion UNIQUE ganó la carrera, informar conflicto y no error interno.
+        if referencia_unica and db(
+            db.pago.referencia_unica == referencia_unica
+        ).count() > 0:
+            return respuesta_json(
+                exito=False,
+                mensaje="Esta referencia ya esta registrada",
+                codigo=409,
+            )
         return respuesta_json(
             exito=False, mensaje="No se pudo registrar el pago. Intenta nuevamente.", codigo=500
         )
