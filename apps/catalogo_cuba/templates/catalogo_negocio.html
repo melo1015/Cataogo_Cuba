@@ -316,6 +316,25 @@
 
     try { cart = JSON.parse(localStorage.getItem(storeKey) || '{}') || {}; } catch (_) { cart = {}; }
     catalog = getCatalog();
+    function renderAddButtons() {
+        if (!catalog || !Array.isArray(catalog.productos)) return;
+        document.querySelectorAll('#catalogo-productos .product-card').forEach(card => {
+            const href = card.getAttribute('href') || '';
+            const product = catalog.productos.find(p => href.endsWith('/producto/' + encodeURIComponent(p.slug || '')));
+            if (product) {
+                const info = card.querySelector('.product-info');
+                if (info && !info.querySelector('[data-add-product]')) {
+                    const button = document.createElement('button');
+                    button.type = 'button'; button.className = 'btn btn-primary';
+                    button.textContent = 'Añadir al pedido'; button.dataset.addProduct = '1';
+                    button.style.marginTop = '.5rem';
+                    button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); addProduct(product); });
+                    info.appendChild(button);
+                }
+            }
+        });
+    }
+    renderAddButtons();
     fetch(grid.dataset.urlApiCatalogo).then(r => r.json()).then(data => {
         if (data.exito) {
             catalog = data;
@@ -324,25 +343,13 @@
             if (navigator.serviceWorker && navigator.serviceWorker.controller) {
                 navigator.serviceWorker.controller.postMessage({ type: 'CACHE_CATALOG', url: grid.dataset.urlApiCatalogo, data });
             }
-            document.querySelectorAll('#catalogo-productos .product-card').forEach(card => {
-                const href = card.getAttribute('href') || '';
-                const product = (data.productos || []).find(p => href.endsWith('/producto/' + encodeURIComponent(p.slug || '')));
-                if (product) {
-                    const info = card.querySelector('.product-info');
-                    if (info && !info.querySelector('[data-add-product]')) {
-                        const button = document.createElement('button');
-                        button.type = 'button'; button.className = 'btn btn-primary';
-                        button.textContent = 'Añadir al pedido'; button.dataset.addProduct = '1';
-                        button.style.marginTop = '.5rem';
-                        button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); addProduct(product); });
-                        info.appendChild(button);
-                    }
-                }
-            });
+            renderAddButtons();
             renderCart();
         }
     }).catch(() => {
         catalog = getCatalog();
+        renderAddButtons();
+        renderCart();
         setStatus(catalog ? 'Sin conexión: catálogo guardado disponible; comprueba los datos antes de enviar.' : 'Sin conexión y sin catálogo guardado.');
     });
 
