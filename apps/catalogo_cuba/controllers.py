@@ -3,6 +3,7 @@ Controladores - CatalogoCuba
 Define todas las acciones/rutas de la aplicacion (py4web)
 """
 import os
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -1055,44 +1056,64 @@ def admin_realizar_pago():
         if not negocio:
             return respuesta_json(exito=False, mensaje="Negocio no encontrado")
 
-        metodo = request.forms.get("metodo_pago")
-        monto = request.forms.get("monto")
-        moneda = request.forms.get("moneda", "CUP")
-        referencia = request.forms.get("referencia", "")
+        metodo = (request.forms.get("metodo_pago") or "").strip().lower()
+        moneda = (request.forms.get("moneda") or "CUP").strip().upper()
+        referencia = (request.forms.get("referencia") or "").strip()[:100]
+        monto_raw = (request.forms.get("monto") or "").strip().replace(",", ".")
+
+        metodos_permitidos = {"transfermovil", "presencial", "usdt"}
+        monedas_permitidas = {"CUP", "MLC", "USD", "USDT"}
+        if metodo not in metodos_permitidos:
+            return respuesta_json(exito=False, mensaje="Metodo de pago no valido", codigo=400)
+        if moneda not in monedas_permitidas:
+            return respuesta_json(exito=False, mensaje="Moneda no valida", codigo=400)
+        if not monto_raw or len(monto_raw) > 20:
+            return respuesta_json(exito=False, mensaje="Importe no valido", codigo=400)
+        try:
+            monto_decimal = Decimal(monto_raw)
+        except (InvalidOperation, ValueError):
+            return respuesta_json(exito=False, mensaje="Importe no valido", codigo=400)
+        if not monto_decimal.is_finite() or monto_decimal <= 0 or monto_decimal > Decimal("99999999.99"):
+            return respuesta_json(exito=False, mensaje="El importe debe ser mayor que cero y estar dentro del limite permitido", codigo=400)
+        monto_decimal = monto_decimal.quantize(Decimal("0.01"))
 
         suscripcion = db(
             (db.suscripcion.negocio_id == negocio.id) &
             db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])
         ).select(orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)).first()
 
-        if not suscripcion:
-            suscripcion_id = db.suscripcion.insert(
-                negocio_id=negocio.id, usuario_id=user["id"],
-                fecha_inicio=ahora_cuba().date(),
-                fecha_fin=(ahora_cuba() + timedelta(days=30)).date(),
-                estado="pendiente", metodo_pago=metodo,
-                fecha_creacion=ahora_cuba(),
-            )
-        else:
-            suscripcion_id = suscripcion.id
-            db(db.suscripcion.id == suscripcion_id).update(
-                estado="pendiente", metodo_pago=metodo,
-            )
-        db.commit()
+        try:
+            if not suscripcion:
+                suscripcion_id = db.suscripcion.insert(
+                    negocio_id=negocio.id, usuario_id=user["id"],
+                    fecha_inicio=ahora_cuba().date(),
+                    fecha_fin=(ahora_cuba() + timedelta(days=30)).date(),
+                    estado="pendiente", metodo_pago=metodo,
+                    fecha_creacion=ahora_cuba(),
+                )
+            else:
+                suscripcion_id = suscripcion.id
+                db(db.suscripcion.id == suscripcion_id).update(
+                    estado="pendiente", metodo_pago=metodo,
+                )
 
-        pago_id = db.pago.insert(
-            suscripcion_id=suscripcion_id, negocio_id=negocio.id,
-            usuario_id=user["id"], monto=float(monto), moneda=moneda,
-            metodo_pago=metodo, estado="pendiente", referencia=referencia,
-            fecha_solicitud=ahora_cuba(),
-        )
-        db.commit()
+            pago_id = db.pago.insert(
+                suscripcion_id=suscripcion_id, negocio_id=negocio.id,
+                usuario_id=user["id"], monto=str(monto_decimal), moneda=moneda,
+                metodo_pago=metodo, estado="pendiente", referencia=referencia,
+                fecha_solicitud=ahora_cuba(),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
 
         return respuesta_json(exito=True,
                               mensaje="Pago registrado correctamente. Pendiente de validacion.",
                               datos={"pago_id": pago_id})
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo registrar el pago. Verifique los datos e intente nuevamente.", codigo=400)
 
 
 # ============================================================
@@ -1544,21 +1565,30 @@ def superadmin_validar_pago(pago_id):
     if not pago:
         return respuesta_json(exito=False, mensaje="Pago no encontrado")
 
-    estado = request.forms.get("estado", "validado")
-    notas = request.forms.get("notas", "")
+    estado = (request.forms.get("estado") or "validado").strip().lower()
+    notas = (request.forms.get("notas") or "").strip()[:2000]
     user = auth.get_user()
+    if estado not in {"validado", "rechazado", "en_proceso", "pendiente"}:
+        return respuesta_json(exito=False, mensaje="Estado de pago no permitido", codigo=400)
+    if pago.estado == "validado":
+        return respuesta_json(exito=False, mensaje="Este pago ya fue validado; no puede aplicarse otra vez", codigo=409)
+    if estado == "validado" and not pago.suscripcion_id:
+        return respuesta_json(exito=False, mensaje="El pago no tiene una suscripcion asociada", codigo=409)
 
-    db(db.pago.id == pago_id).update(
-        estado=estado, fecha_validacion=ahora_cuba(),
-        validado_por=user["id"] if user else None,
-        notas_validacion=notas,
-    )
-    db.commit()
-
-    if estado == "validado":
-        suscripcion = db.suscripcion[pago.suscripcion_id]
-        if suscripcion:
-            base = max(suscripcion.fecha_fin, ahora_cuba().date()) if suscripcion.fecha_fin else ahora_cuba().date()
+    try:
+        # Pago, suscripcion y notificacion se confirman como una sola unidad logica.
+        db(db.pago.id == pago_id).update(
+            estado=estado, fecha_validacion=ahora_cuba(),
+            validado_por=user["id"] if user else None,
+            notas_validacion=notas,
+        )
+        if estado == "validado":
+            suscripcion = db.suscripcion[pago.suscripcion_id]
+            if not suscripcion:
+                db.rollback()
+                return respuesta_json(exito=False, mensaje="Suscripcion asociada no encontrada", codigo=409)
+            hoy = ahora_cuba().date()
+            base = max(suscripcion.fecha_fin, hoy) if suscripcion.fecha_fin else hoy
             nueva_fecha_fin = base + timedelta(days=30)
             db(db.suscripcion.id == pago.suscripcion_id).update(
                 estado="activa", fecha_fin=nueva_fecha_fin,
@@ -1572,7 +1602,10 @@ def superadmin_validar_pago(pago_id):
                     pago.monto, pago.moneda, nueva_fecha_fin.strftime('%d/%m/%Y')),
                 fecha_creacion=ahora_cuba(),
             )
-            db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el pago; no se guardaron cambios.", codigo=500)
 
     return respuesta_json(exito=True, mensaje="Pago %s correctamente" % estado)
 
@@ -1692,17 +1725,26 @@ def verificar_suscripcion_activa(negocio_id):
 @action("catalogo_cuba/uploads/<filename:path>")
 @action.uses()
 def serve_uploads(filename):
-    ruta = os.path.join(settings.UPLOAD_FOLDER, filename)
-    if not os.path.exists(ruta):
+    # Normalizar y verificar que la ruta final siga dentro de UPLOAD_FOLDER.
+    base = os.path.realpath(settings.UPLOAD_FOLDER)
+    ruta = os.path.realpath(os.path.join(base, filename))
+    try:
+        dentro_de_uploads = os.path.commonpath([base, ruta]) == base
+    except (ValueError, OSError):
+        dentro_de_uploads = False
+    if not dentro_de_uploads or not os.path.isfile(ruta):
         raise HTTP(404, "Archivo no encontrado")
 
-    ext = os.path.splitext(filename)[1].lower()
+    ext = os.path.splitext(ruta)[1].lower()
     content_type = {
         ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
-    }.get(ext, "application/octet-stream")
+    }.get(ext)
+    if not content_type:
+        raise HTTP(404, "Archivo no encontrado")
 
     response.headers["Content-Type"] = content_type
+    response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "public, max-age=86400"
     with open(ruta, "rb") as f:
         return f.read()
