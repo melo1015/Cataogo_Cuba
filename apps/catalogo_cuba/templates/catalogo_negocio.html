@@ -174,27 +174,63 @@
                 .then(data => {
                     if (data.exito && data.productos.length > 0) {
                         data.productos.forEach(p => {
-                            const precioHtml = p.precio_texto
-                                ? `<div class="flex" style="margin-top:.4rem;align-items:baseline">
-                                     <span class="product-price">${p.precio_texto}</span>
-                                     ${p.precio_anterior_texto ? `<span class="product-price-old">${p.precio_anterior_texto}</span>` : ''}
-                                   </div>`
-                                : '';
-
+                            // Construir nodos DOM explícitamente: no insertar datos del
+                            // catálogo en innerHTML, porque nombre/descrición/precio son
+                            // contenido editable por comerciantes y podrían contener HTML.
                             const card = document.createElement('a');
                             card.className = 'card product-card';
                             card.style.cssText = 'text-decoration:none;color:inherit;overflow:hidden';
-                            card.href = urlBaseNegocio + '/producto/' + p.slug;
+                            card.href = urlBaseNegocio + '/producto/' + encodeURIComponent(p.slug || '');
 
-                            const imgHtml = p.imagen_principal
-                                ? `<img src="${urlUploads}${p.imagen_principal}" alt="${p.nombre}" class="product-img" loading="lazy">`
-                                : `<div class="product-img flex" style="justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem">📦</div>`;
+                            if (p.imagen_principal) {
+                                const img = document.createElement('img');
+                                img.src = urlUploads + encodeURIComponent(p.imagen_principal);
+                                img.alt = String(p.nombre || '');
+                                img.className = 'product-img';
+                                img.loading = 'lazy';
+                                card.appendChild(img);
+                            } else {
+                                const placeholder = document.createElement('div');
+                                placeholder.className = 'product-img flex';
+                                placeholder.style.cssText = 'justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem';
+                                placeholder.textContent = '📦';
+                                card.appendChild(placeholder);
+                            }
 
-                            card.innerHTML = imgHtml + `<div class="product-info">
-                                <h3 class="product-name truncate">${p.nombre}</h3>
-                                ${p.descripcion_corta ? `<p class="text-sm truncate">${p.descripcion_corta}</p>` : ''}
-                                ${precioHtml}
-                            </div>`;
+                            const info = document.createElement('div');
+                            info.className = 'product-info';
+
+                            const name = document.createElement('h3');
+                            name.className = 'product-name truncate';
+                            name.textContent = String(p.nombre || '');
+                            info.appendChild(name);
+
+                            if (p.descripcion_corta) {
+                                const description = document.createElement('p');
+                                description.className = 'text-sm truncate';
+                                description.textContent = String(p.descripcion_corta);
+                                info.appendChild(description);
+                            }
+
+                            if (p.precio_texto) {
+                                const priceRow = document.createElement('div');
+                                priceRow.className = 'flex';
+                                priceRow.style.cssText = 'margin-top:.4rem;align-items:baseline';
+                                const price = document.createElement('span');
+                                price.className = 'product-price';
+                                price.textContent = String(p.precio_texto);
+                                priceRow.appendChild(price);
+
+                                if (p.precio_anterior_texto) {
+                                    const oldPrice = document.createElement('span');
+                                    oldPrice.className = 'product-price-old';
+                                    oldPrice.textContent = String(p.precio_anterior_texto);
+                                    priceRow.appendChild(oldPrice);
+                                }
+                                info.appendChild(priceRow);
+                            }
+
+                            card.appendChild(info);
                             contenedor.appendChild(card);
                         });
                         btn.dataset.pagina = parseInt(pagina, 10) + 1;
