@@ -33,8 +33,6 @@ UPLOAD_FOLDER = os.path.abspath(os.environ.get(
 ))
 
 SESSION_TYPE = "cookie"
-# No se permite desactivar Secure en producción: el sitio debe publicarse por HTTPS.
-SESSION_SECURE = IS_PRODUCTION or os.environ.get("CATALOGO_CUBA_SECURE", "0").strip() == "1"
 SESSION_SAMESITE = "Lax"
 SESSION_EXPIRATION = 3600 * 24 * 7
 
