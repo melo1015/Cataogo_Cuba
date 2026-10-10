@@ -208,14 +208,19 @@ async function servirCatalogoOffline(request) {
 
 self.addEventListener('sync', event => {
     if (event.tag === 'sync-catalogo') {
-        event.waitUntil(sincronizarCatalogo());
+        // No anunciar una sincronizacion exitosa: aun no existe una cola
+        // persistente de operaciones ni un endpoint servidor que la procese.
+        event.waitUntil(notificarSincronizacionPendiente());
     }
 });
 
-async function sincronizarCatalogo() {
+async function notificarSincronizacionPendiente() {
     const clients = await self.clients.matchAll({ type: 'window' });
     clients.forEach(client => {
-        client.postMessage({ type: 'SYNC_COMPLETE', message: 'Sincronizacion completada' });
+        client.postMessage({
+            type: 'SYNC_UNAVAILABLE',
+            message: 'La sincronizacion de pedidos pendientes aun no esta implementada.'
+        });
     });
 }
 
