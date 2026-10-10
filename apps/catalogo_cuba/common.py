@@ -41,7 +41,14 @@ session = Session(secret=settings.SESSION_SECRET_KEY)
 # AUTENTICACION
 # ============================================================
 
-auth = Auth(session, db)
+auth = Auth(
+    session,
+    db,
+    extra_fields=[
+        Field("fecha_registro", "datetime", default=None),
+        Field("telefono", "string", length=20, default=""),
+    ],
+)
 
 auth.param.registration_requires_confirmation = settings.AUTH_REGISTRATION_REQUIRES_CONFIRMATION
 
