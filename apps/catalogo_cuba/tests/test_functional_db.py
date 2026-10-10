@@ -124,6 +124,36 @@ class DatabaseFlowTests(unittest.TestCase):
             self.assertTrue(duplicate_order_rejected, "La base de datos acepto un pedido duplicado")
             self.assertEqual(db(db.pedido.client_uuid == order_uuid).count(), 1)
 
+            # La aceptacion solo descuenta si la cantidad sigue disponible.
+            stock_antes = db.producto[product_id].stock
+            sin_stock_suficiente = db(
+                (db.producto.id == product_id) &
+                (db.producto.stock >= 8)
+            ).update(stock=db.producto.stock - 8)
+            self.assertEqual(sin_stock_suficiente, 0)
+            self.assertEqual(db.producto[product_id].stock, stock_antes)
+
+            reserva_stock = db(
+                (db.producto.id == product_id) &
+                (db.producto.negocio_id == business_id) &
+                (db.producto.disponible == True) &
+                (db.producto.stock >= 2)
+            ).update(stock=db.producto.stock - 2)
+            self.assertEqual(reserva_stock, 1)
+            self.assertEqual(db.producto[product_id].stock, stock_antes - 2)
+
+            primer_estado = db(
+                (db.pedido.id == order_id) &
+                (db.pedido.estado == "pendiente_revision")
+            ).update(estado="aceptado")
+            segundo_estado = db(
+                (db.pedido.id == order_id) &
+                (db.pedido.estado == "pendiente_revision")
+            ).update(estado="rechazado")
+            self.assertEqual(primer_estado, 1)
+            self.assertEqual(segundo_estado, 0)
+            db.commit()
+
             # La unicidad en base de datos bloquea referencias duplicadas aun
             # si una solicitud concurrente supera la consulta previa del controlador.
             duplicate_rejected = False
