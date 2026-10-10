@@ -132,6 +132,14 @@ jobs:
                   protected_status = protected_response.getcode()
               except urllib.error.HTTPError as exc:
                   protected_status = exc.code
+                  if exc.code >= 500:
+                      body = exc.read().decode("utf-8", errors="replace")
+                      server.terminate()
+                      output, _ = server.communicate(timeout=10)
+                      raise RuntimeError(
+                          "Payment-validation route returned HTTP %s. Response body: %s. "
+                          "Server output: %s" % (exc.code, body[-3000:], output[-10000:])
+                      )
 
               if protected_status not in (302, 303, 401, 403):
                   raise AssertionError(
