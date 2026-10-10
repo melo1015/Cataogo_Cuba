@@ -23,8 +23,8 @@ Aplicacion web en **py4web** para que pequenos negocios, MIPYMES y minoristas cu
 
 ## Requisitos
 
-- Python 3.7+
-- py4web (>= 2023.1.0)
+- Python 3.8+ (Pillow 10 o superior requiere Python 3.8+)
+- py4web (>= 2023.1.0; version exacta pendiente de fijar tras las pruebas de compatibilidad)
 - Pillow (>= 10.0.0) — para compresion de imagenes
 
 ---
