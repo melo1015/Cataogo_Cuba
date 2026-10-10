@@ -6,7 +6,7 @@ import os
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta
 import uuid
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from py4web import action, request, response, redirect, URL, HTTP
 from py4web.utils.form import Form, FormStyleBulma
@@ -30,6 +30,24 @@ def get_client_ip():
         "HTTP_X_FORWARDED_FOR",
         request.environ.get("REMOTE_ADDR", "")
     )
+
+
+def _peticion_mismo_origen():
+    """
+    Verifica Origin/Referer para endpoints mutables autenticados por cookie.
+    No sustituye el CSRF de Form: cubre las rutas JSON/form-data personalizadas.
+    """
+    host = (request.environ.get("HTTP_HOST") or "").strip().lower()
+    origen = (request.environ.get("HTTP_ORIGIN") or "").strip()
+    referer = (request.environ.get("HTTP_REFERER") or "").strip()
+    candidato = origen or referer
+    if not host or not candidato:
+        return False
+    try:
+        parsed = urlsplit(candidato)
+        return parsed.scheme in ("http", "https") and parsed.netloc.lower() == host
+    except (TypeError, ValueError):
+        return False
 
 
 def _rechazar_uploads_excesivos(nombres_campos):
@@ -762,7 +780,10 @@ def api_crear_pedido(slug):
 @action("catalogo_cuba/admin/pedidos/<pedido_id>/estado", method=["POST"])
 @action.uses(db)
 def admin_actualizar_estado_pedido(pedido_id):
-    """Acepta o rechaza pedidos; la aceptacion descuenta stock de forma condicional."""
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+"""Acepta o rechaza pedidos; la aceptacion descuenta stock de forma condicional."""
     user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
@@ -1346,7 +1367,10 @@ def admin_inventario():
 @action("catalogo_cuba/api/inventario/actualizar", method=["POST"])
 @action.uses(session, auth.user, db)
 def api_actualizar_stock():
-    user = auth.get_user()
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1431,7 +1455,10 @@ def admin_suscripcion():
 @action("catalogo_cuba/admin/pago/realizar", method=["POST"])
 @action.uses(session, auth.user, db)
 def admin_realizar_pago():
-    user = auth.get_user()
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1755,7 +1782,10 @@ def superadmin_negocios():
 @action("catalogo_cuba/superadmin/negocio/aprobar/<negocio_id:int>", method=["POST"])
 @action.uses(session, auth.user, db)
 def superadmin_aprobar_negocio(negocio_id):
-    if not es_superadmin():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     negocio = db.negocio[negocio_id]
@@ -1772,7 +1802,10 @@ def superadmin_aprobar_negocio(negocio_id):
 @action("catalogo_cuba/superadmin/negocio/toggle/<negocio_id:int>", method=["POST"])
 @action.uses(session, auth.user, db)
 def superadmin_toggle_negocio(negocio_id):
-    if not es_superadmin():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     negocio = db.negocio[negocio_id]
@@ -1846,7 +1879,10 @@ def superadmin_usuarios():
 @action("catalogo_cuba/superadmin/usuario/cambiar-rol/<usuario_id:int>", method=["POST"])
 @action.uses(session, auth.user, db)
 def superadmin_cambiar_rol(usuario_id):
-    if not es_superadmin():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     nuevo_rol = request.forms.get("rol", "")
@@ -1992,7 +2028,10 @@ def superadmin_pagos():
 @action("catalogo_cuba/superadmin/pago/validar/<pago_id:int>", method=["POST"])
 @action.uses(session, auth.user, db)
 def superadmin_validar_pago(pago_id):
-    if not es_superadmin():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     pago = db.pago[pago_id]
@@ -2113,7 +2152,10 @@ def superadmin_configuracion():
 @action("catalogo_cuba/superadmin/configuracion/guardar", method=["POST"])
 @action.uses(session, auth.user, db)
 def superadmin_guardar_configuracion():
-    if not es_superadmin():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     try:
@@ -2170,7 +2212,10 @@ def api_notificaciones():
 @action("catalogo_cuba/api/notificacion/leer/<notificacion_id:int>", method=["POST"])
 @action.uses(session, auth.user)
 def api_marcar_leida(notificacion_id):
-    user = auth.get_user()
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+user = auth.get_user()
     if not user:
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
