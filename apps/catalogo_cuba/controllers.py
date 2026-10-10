@@ -608,30 +608,34 @@ def admin_negocio_nuevo():
         "color_tema", "moneda_principal", "mostrar_precios",
         "facebook", "instagram", "telegram", "meta_descripcion",
     ]
-    form = Form(db.negocio, fields=campos, deletable=False, formstyle=FormStyleBulma)
+    # El alta es manual: slug y usuario_id son obligatorios y no pertenecen al formulario público.
+    form = Form(db.negocio, fields=campos, deletable=False,
+                formstyle=FormStyleBulma, dbio=False)
 
     if form.accepted:
-        negocio_id = form.vars.get("id")
-        nombre = form.vars.get("nombre", "")
-        slug = slugify(nombre)
+        nombre = form.vars.get("nombre", "").strip()
+        slug_original = slugify(nombre)
+        slug = slug_original
         contador = 1
-        slug_original = slug
         while db(db.negocio.slug == slug).count() > 0:
             slug = "%s-%d" % (slug_original, contador)
             contador += 1
 
-        db(db.negocio.id == negocio_id).update(
+        ahora = ahora_cuba()
+        datos_negocio = {campo: form.vars.get(campo) for campo in campos}
+        datos_negocio.update(
             usuario_id=user["id"], slug=slug,
-            fecha_creacion=ahora_cuba(), fecha_actualizacion=ahora_cuba(),
+            fecha_creacion=ahora, fecha_actualizacion=ahora,
             activo=True, aprobado=False,
         )
+        negocio_id = db.negocio.insert(**datos_negocio)
         db.suscripcion.insert(
             negocio_id=negocio_id, usuario_id=user["id"],
-            fecha_inicio=ahora_cuba().date(),
-            fecha_fin=(ahora_cuba() + timedelta(days=settings.DIAS_PRUEBA_GRATIS)).date(),
+            fecha_inicio=ahora.date(),
+            fecha_fin=(ahora + timedelta(days=settings.DIAS_PRUEBA_GRATIS)).date(),
             estado="prueba", metodo_pago="prueba",
             monto_pagado=0, dias_prueba=settings.DIAS_PRUEBA_GRATIS,
-            fecha_creacion=ahora_cuba(),
+            fecha_creacion=ahora,
         )
         db.commit()
 
