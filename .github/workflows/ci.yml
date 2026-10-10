@@ -69,7 +69,7 @@ jobs:
           base = "http://127.0.0.1:8765"
           server = subprocess.Popen(
               [
-                  "py4web", "run",
+                  "py4web", "run", "--yes",
                   "--host", "127.0.0.1", "--port", "8765",
                   "--app_names", "catalogo_cuba", "--server", "wsgiref",
                   "--quiet", "--watch", "off", "apps",
