@@ -202,6 +202,15 @@
         });
     }
     async function updateQueued(order) { return saveQueued(order); }
+    async function deleteQueued(id) {
+        const db = await openDb();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(queueStore, 'readwrite');
+            tx.objectStore(queueStore).delete(id);
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+        });
+    }
     function setStatus(message) {
         const el = document.getElementById('pedido-estado');
         if (el) el.textContent = message;
@@ -257,7 +266,26 @@
             const queued = await allQueued();
             queued.filter(o => o.slug === slug).forEach(o => {
                 const li = document.createElement('li');
-                li.textContent = (o.status === 'received' ? 'Recibido por el servidor' : o.status === 'error' ? 'Error: requiere revisión/reintento' : 'Pendiente de envío') + ' · ' + o.client_uuid;
+                li.style.cssText = 'margin:.5rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap';
+                const label = document.createElement('span');
+                label.textContent = (o.status === 'received' ? 'Recibido por el servidor' : o.status === 'error' ? 'Rechazado: ' + (o.last_error || 'revisar datos') : 'Pendiente de envío') + ' · ' + o.client_uuid;
+                li.appendChild(label);
+                if (o.status === 'pending') {
+                    const retry = document.createElement('button');
+                    retry.type = 'button'; retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
+                    retry.addEventListener('click', syncQueue);
+                    li.appendChild(retry);
+                }
+                if (o.status === 'error') {
+                    const remove = document.createElement('button');
+                    remove.type = 'button'; remove.className = 'btn btn-secondary'; remove.textContent = 'Eliminar para corregir';
+                    remove.addEventListener('click', async () => {
+                        await deleteQueued(o.client_uuid);
+                        setStatus('Pedido rechazado eliminado de la cola. Revisa los productos y crea uno nuevo.');
+                        renderQueue();
+                    });
+                    li.appendChild(remove);
+                }
                 list.appendChild(li);
             });
         } catch (_) {
