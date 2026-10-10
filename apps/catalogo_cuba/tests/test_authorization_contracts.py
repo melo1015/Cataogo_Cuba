@@ -144,5 +144,35 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("db.categoria.id != categoria_id", category_edit)
 
 
+    def test_authenticated_mutation_endpoints_reject_cross_origin_requests(self):
+        protected = [
+            "admin_actualizar_estado_pedido",
+            "api_actualizar_stock",
+            "admin_realizar_pago",
+            "superadmin_aprobar_negocio",
+            "superadmin_toggle_negocio",
+            "superadmin_cambiar_rol",
+            "superadmin_validar_pago",
+            "superadmin_guardar_configuracion",
+            "api_marcar_leida",
+        ]
+        for name in protected:
+            with self.subTest(endpoint=name):
+                body = controller_function(self.source, name)
+                self.assertIn("_peticion_mismo_origen()", body)
+
+    def test_upload_routes_reject_oversized_files_before_form_processing(self):
+        for name, field in [
+            ("admin_negocio_editar", "logo"),
+            ("admin_producto_nuevo", "imagen_principal"),
+            ("admin_producto_editar", "imagen_principal"),
+            ("admin_categoria_nueva", "imagen"),
+            ("admin_categoria_editar", "imagen"),
+        ]:
+            with self.subTest(endpoint=name):
+                body = controller_function(self.source, name)
+                self.assertIn("_rechazar_uploads_excesivos", body)
+                self.assertIn(field, body)
+
 if __name__ == "__main__":
     unittest.main()
