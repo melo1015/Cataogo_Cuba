@@ -22,3 +22,10 @@ jobs:
         run: python -m pip install -r apps/catalogo_cuba/requirements.txt
       - name: Compile Python files
         run: python -m compileall -q apps/catalogo_cuba
+      - name: Import application smoke test
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          PYTHONPATH: apps
+        run: python -c "import catalogo_cuba; print('CatalogoCuba import OK')"
+      - name: Check service worker JavaScript syntax
+        run: node --check apps/catalogo_cuba/static/sw.js
