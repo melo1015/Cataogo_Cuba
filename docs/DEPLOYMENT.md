@@ -40,7 +40,7 @@ SQLite puede servir para una primera instancia de bajo tráfico **con un solo pr
 ## 4. Antes de aceptar usuarios o pagos
 
 - Confirmar que el dominio redirige todo HTTP a HTTPS.
-- Verificar que las cookies de sesión llevan `Secure`, `HttpOnly` y `SameSite=Lax` en el despliegue real.
+- Configurar el servidor/proxy para que py4web reciba la URL como HTTPS (esquema WSGI `https`); py4web decide el atributo `Secure` de la cookie a partir del esquema de la petición. No basta con que el certificado SSL esté solo en el proxy si el tráfico interno hace que py4web vea HTTP. Verificar en el navegador que las cookies llevan `Secure`, `HttpOnly` y `SameSite=Lax`.
 - Crear el primer superadministrador mediante un procedimiento controlado; no exponer una ruta pública para asignar ese rol.
 - Probar registro, login/logout, recuperación de contraseña, autorización por propietario, CRUD de productos, pedidos, pagos y aprobación administrativa con cuentas de prueba.
 - Comprobar que las solicitudes POST maliciosas o anónimas se rechazan y que los errores 4xx/5xx no muestran trazas.
