@@ -1549,6 +1549,13 @@ def superadmin_validar_pago(pago_id):
     notas = request.forms.get("notas", "")
     user = auth.get_user()
 
+    if estado not in ("validado", "rechazado", "en_proceso", "pendiente"):
+        return respuesta_json(exito=False, mensaje="Estado de pago no valido", codigo=400)
+
+    # Una validacion confirmada no debe volver a extender la suscripcion.
+    if pago.estado == "validado":
+        return respuesta_json(exito=True, mensaje="Este pago ya fue validado; no se aplicaron cambios.")
+
     db(db.pago.id == pago_id).update(
         estado=estado, fecha_validacion=ahora_cuba(),
         validado_por=user["id"] if user else None,
