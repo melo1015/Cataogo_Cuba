@@ -31,13 +31,13 @@ class AuthorizationContractTests(unittest.TestCase):
 
     def test_inventory_update_requires_commerce_role_and_owned_product(self):
         body = controller_function(self.source, "api_actualizar_stock")
-        self.assertIn("not es_comerciante()", body)
+        self.assertIn("not es_comerciante(user)", body)
         self.assertIn("db.negocio.usuario_id == user[\"id\"]", body)
         self.assertIn("db.producto.negocio_id == negocio.id", body)
 
     def test_subscription_payment_uses_server_price_and_commerce_ownership(self):
         body = controller_function(self.source, "admin_realizar_pago")
-        self.assertIn("not es_comerciante()", body)
+        self.assertIn("not es_comerciante(user)", body)
         self.assertIn("db.negocio.usuario_id == user[\"id\"]", body)
         self.assertIn("settings.COSTO_SUSCRIPCION_MENSUAL_CUP", body)
         self.assertIn("settings.COSTO_SUSCRIPCION_MENSUAL_USDT", body)
