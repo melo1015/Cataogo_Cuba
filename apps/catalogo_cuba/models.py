@@ -203,6 +203,10 @@ db.define_table(
               'en_proceso': 'En proceso'
           })),
     Field("referencia", "string", length=100, default="", label="Referencia/Numero de transaccion"),
+    # Clave normalizada y unica: el indice de la base de datos evita duplicados
+    # incluso cuando dos solicitudes concurrentes superan la comprobacion previa.
+    Field("referencia_unica", "string", length=120, unique=True, default=None,
+          label="Clave interna de referencia"),
     Field("comprobante", "upload", uploadfolder=settings.UPLOAD_FOLDER, label="Comprobante de pago",
           requires=IS_EMPTY_OR(IS_IMAGE(maxsize=(2000, 2000)))),
     Field("fecha_solicitud", "datetime", default=None, label="Fecha de solicitud"),
