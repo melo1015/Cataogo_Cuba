@@ -64,6 +64,7 @@ class DatabaseFlowTests(unittest.TestCase):
                 metodo_pago="transfermovil",
                 estado="pendiente",
                 referencia="CI-%s" % suffix,
+                referencia_unica="transfermovil:ci-%s" % suffix.casefold(),
                 fecha_solicitud=now,
             )
             db.commit()
@@ -77,6 +78,32 @@ class DatabaseFlowTests(unittest.TestCase):
             self.assertEqual(product.stock, 7)
             self.assertEqual(str(payment.monto), "1500.00")
             self.assertEqual(payment.suscripcion_id, subscription_id)
+
+            # La unicidad en base de datos bloquea referencias duplicadas aun
+            # si una solicitud concurrente supera la consulta previa del controlador.
+            duplicate_rejected = False
+            try:
+                db.pago.insert(
+                    suscripcion_id=subscription_id,
+                    negocio_id=business_id,
+                    usuario_id=user_id,
+                    monto="1500.00",
+                    moneda="CUP",
+                    metodo_pago="transfermovil",
+                    estado="pendiente",
+                    referencia="ci-%s" % suffix,
+                    referencia_unica="transfermovil:ci-%s" % suffix.casefold(),
+                    fecha_solicitud=now,
+                )
+                db.commit()
+            except Exception:
+                duplicate_rejected = True
+                db.rollback()
+            self.assertTrue(duplicate_rejected, "La base de datos acepto una referencia duplicada")
+            self.assertEqual(
+                db(db.pago.referencia_unica == "transfermovil:ci-%s" % suffix.casefold()).count(),
+                1,
+            )
 
             # La validacion usa compare-and-set para que solicitudes simultaneas
             # basadas en el estado antiguo no puedan aplicar el mismo cambio.
