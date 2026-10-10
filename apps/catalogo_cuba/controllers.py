@@ -32,6 +32,24 @@ def get_client_ip():
     )
 
 
+def _rechazar_uploads_excesivos(nombres_campos):
+    """Corta antes de construir Form si un upload supera el limite de bytes."""
+    for nombre in nombres_campos:
+        archivo = request.files.get(nombre)
+        if not archivo or not getattr(archivo, "file", None):
+            continue
+        stream = archivo.file
+        try:
+            posicion = stream.tell()
+            stream.seek(0, os.SEEK_END)
+            tamano = stream.tell()
+            stream.seek(posicion)
+        except (AttributeError, OSError, ValueError):
+            raise HTTP(400, "No se pudo validar el archivo subido")
+        if tamano > settings.MAX_IMAGE_SIZE:
+            raise HTTP(413, "La imagen supera el limite permitido de 2 MiB")
+
+
 def _tiene_rol(user_id, rol):
     """Verifica si un usuario tiene un rol (tag) determinado."""
     if not user_id:
@@ -962,6 +980,7 @@ def admin_negocio_nuevo():
 @action("catalogo_cuba/admin/negocio/editar", method=["GET", "POST"])
 @action.uses("admin_negocio_form.html", *AccionBase)
 def admin_negocio_editar():
+    _rechazar_uploads_excesivos(["logo"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -1057,6 +1076,7 @@ def admin_productos():
 @action("catalogo_cuba/admin/producto/nuevo", method=["GET", "POST"])
 @action.uses("admin_producto_form.html", *AccionBase)
 def admin_producto_nuevo():
+    _rechazar_uploads_excesivos(["imagen_principal"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -1105,6 +1125,7 @@ def admin_producto_nuevo():
 @action("catalogo_cuba/admin/producto/editar/<producto_id:int>", method=["GET", "POST"])
 @action.uses("admin_producto_form.html", *AccionBase)
 def admin_producto_editar(producto_id):
+    _rechazar_uploads_excesivos(["imagen_principal"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -1201,6 +1222,7 @@ def admin_categorias():
 @action("catalogo_cuba/admin/categoria/nueva", method=["GET", "POST"])
 @action.uses("admin_categoria_form.html", *AccionBase)
 def admin_categoria_nueva():
+    _rechazar_uploads_excesivos(["imagen"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -1236,6 +1258,7 @@ def admin_categoria_nueva():
 @action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
 @action.uses("admin_categoria_form.html", *AccionBase)
 def admin_categoria_editar(categoria_id):
+    _rechazar_uploads_excesivos(["imagen"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
