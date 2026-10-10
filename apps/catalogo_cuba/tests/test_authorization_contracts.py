@@ -174,5 +174,17 @@ class AuthorizationContractTests(unittest.TestCase):
                 self.assertIn("_rechazar_uploads_excesivos", body)
                 self.assertIn(field, body)
 
+    def test_superadmin_role_change_is_transactional_and_does_not_swallow_errors(self):
+        body = controller_function(self.source, "superadmin_cambiar_rol")
+        self.assertIn("db.commit()", body)
+        self.assertIn("db.rollback()", body)
+        self.assertIn("No se pudo actualizar el rol", body)
+
+    def test_configuration_errors_are_rolled_back_without_leaking_details(self):
+        body = controller_function(self.source, "superadmin_guardar_configuracion")
+        self.assertIn("db.rollback()", body)
+        self.assertIn("No se pudo guardar la configuracion", body)
+        self.assertNotIn('mensaje="Error: %s" % str(e)', body)
+
 if __name__ == "__main__":
     unittest.main()
