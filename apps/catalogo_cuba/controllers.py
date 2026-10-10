@@ -1895,8 +1895,9 @@ def superadmin_cambiar_rol(usuario_id):
 
     # Reemplazar roles en una transaccion para evitar estados parciales.
     try:
+        roles_actuales = roles_tags.get(usuario_id) or []
         for r in ["superadmin", "comerciante", "visitante"]:
-            if r != nuevo_rol:
+            if r != nuevo_rol and r in roles_actuales:
                 roles_tags.remove(usuario_id, r)
         asignar_rol(usuario_id, nuevo_rol)
         db.commit()
