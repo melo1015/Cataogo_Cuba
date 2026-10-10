@@ -208,19 +208,72 @@ async function servirCatalogoOffline(request) {
 
 self.addEventListener('sync', event => {
     if (event.tag === 'sync-catalogo') {
-        // No anunciar una sincronizacion exitosa: aun no existe una cola
-        // persistente de operaciones ni un endpoint servidor que la procese.
-        event.waitUntil(notificarSincronizacionPendiente());
+        event.waitUntil(sincronizarPedidosPendientes());
     }
 });
 
-async function notificarSincronizacionPendiente() {
-    const clients = await self.clients.matchAll({ type: 'window' });
-    clients.forEach(client => {
-        client.postMessage({
-            type: 'SYNC_UNAVAILABLE',
-            message: 'La sincronizacion de pedidos pendientes aun no esta implementada.'
+// Background Sync funciona aunque no haya una pestaña abierta en navegadores compatibles.
+// La misma clave client_uuid permite reintentar sin crear pedidos duplicados.
+async function sincronizarPedidosPendientes() {
+    const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open('catalogocuba-orders-v1', 1);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    try {
+        const orders = await new Promise((resolve, reject) => {
+            const req = db.transaction('orders', 'readonly').objectStore('orders').getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
         });
+        for (const order of orders) {
+            if (order.status !== 'pending') continue;
+            try {
+                const response = await fetch(order.endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(order.payload)
+                });
+                const result = await response.json();
+                if (response.ok && result.exito) {
+                    order.status = 'received';
+                    order.server_result = result.datos || {};
+                    order.last_error = '';
+                } else if (response.status >= 500 || response.status === 429) {
+                    // Rechazo temporal: pedir al navegador otro intento.
+                    throw new Error('Error temporal del servidor');
+                } else {
+                    order.status = 'error';
+                    order.last_error = result.mensaje || 'Pedido rechazado por el servidor';
+                }
+                await guardarPedidoEnCola(db, order);
+            } catch (error) {
+                if (error && error.message === 'Error temporal del servidor') {
+                    db.close();
+                    throw error;
+                }
+                order.status = 'pending';
+                order.last_error = 'Sin conexión o respuesta del servidor';
+                await guardarPedidoEnCola(db, order);
+                db.close();
+                throw error;
+            }
+        }
+        db.close();
+        const clients = await self.clients.matchAll({ type: 'window' });
+        clients.forEach(client => client.postMessage({ type: 'SYNC_QUEUE_UPDATED' }));
+    } catch (error) {
+        // Rechazar event.waitUntil para que el navegador pueda reintentar.
+        throw error;
+    }
+}
+
+function guardarPedidoEnCola(db, order) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('orders', 'readwrite');
+        tx.objectStore('orders').put(order);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
     });
 }
 
