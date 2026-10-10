@@ -363,7 +363,10 @@ def catalogo_producto_detalle(slug, producto_slug):
 
     relacionados = []
     if producto.categoria_id:
+        # Aislar los productos relacionados al mismo negocio: una categoria
+        # compartida o mal asignada no debe filtrar productos de otro comercio.
         rel_raw = db(
+            (db.producto.negocio_id == negocio.id) &
             (db.producto.categoria_id == producto.categoria_id) &
             (db.producto.id != producto.id) &
             (db.producto.disponible == True)
@@ -519,10 +522,16 @@ def api_producto_detalle(slug, producto_slug):
         return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
 
     producto = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.slug == producto_slug)
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.slug == producto_slug) &
+        (db.producto.disponible == True)
     ).select().first()
     if not producto:
+        # No revelar productos agotados/desactivados por la API publica.
         return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
+
+    if not verificar_suscripcion_activa(negocio.id):
+        return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
 
     response.headers["Cache-Control"] = "public, max-age=3600"
     return dict(exito=True, producto=_preparar_producto(producto, negocio, con_detalle=True))
