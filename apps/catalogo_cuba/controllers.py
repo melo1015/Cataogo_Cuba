@@ -850,6 +850,24 @@ def admin_dashboard():
         (db.producto.stock <= 5) & (db.producto.disponible == True)
     ).select()
     bajo_stock = [{'id': p.id, 'nombre': p.nombre, 'stock': p.stock or 0} for p in bajo_stock_raw]
+    pedidos_raw = db(
+        (db.pedido.negocio_id == negocio.id) &
+        (db.pedido.estado == "pendiente_revision")
+    ).select(orderby=~db.pedido.fecha_creacion, limitby=(0, 30))
+    pedidos_pendientes = []
+    for pedido in pedidos_raw:
+        lineas_raw = db(db.pedido_item.pedido_id == pedido.id).select()
+        pedidos_pendientes.append({
+            "id": pedido.id,
+            "cliente_nombre": pedido.cliente_nombre,
+            "cliente_telefono": pedido.cliente_telefono,
+            "direccion_entrega": pedido.direccion_entrega or "",
+            "notas": pedido.notas or "",
+            "total": "%.2f" % pedido.total,
+            "moneda": pedido.moneda,
+            "fecha_creacion": pedido.fecha_creacion.strftime("%d/%m/%Y %H:%M") if pedido.fecha_creacion else "-",
+            "lineas": [{"nombre": linea.nombre_producto, "cantidad": linea.cantidad, "subtotal": "%.2f" % linea.subtotal} for linea in lineas_raw],
+        })
 
     return dict(
         negocio={
@@ -862,6 +880,7 @@ def admin_dashboard():
         mas_vistos=mas_vistos,
         suscripcion=suscripcion,
         bajo_stock=bajo_stock,
+        pedidos_pendientes=pedidos_pendientes,
         titulo="Panel - %s" % negocio.nombre,
     )
 
