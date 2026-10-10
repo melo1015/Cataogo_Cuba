@@ -98,7 +98,7 @@ class ContextoBaseFixture(Fixture):
             output.update(contexto_base())
 
 
-AccionBase = (ContextoBaseFixture(), db, session, auth.user)
+AccionBase = (ContextoBaseFixture(),)
 
 
 # --- Preparadores de datos para las vistas --------------------------------
