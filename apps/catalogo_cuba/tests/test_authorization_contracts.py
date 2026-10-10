@@ -192,5 +192,12 @@ class AuthorizationContractTests(unittest.TestCase):
             marker = "@action.uses(session, auth.user, db)\ndef " + name + "("
             self.assertIn(marker, self.source)
 
+    def test_product_image_stream_is_rewound_before_optimization(self):
+        for name in ("admin_producto_nuevo", "admin_producto_editar"):
+            with self.subTest(endpoint=name):
+                body = controller_function(self.source, name)
+                self.assertIn("archivo.file.seek(0)", body)
+                self.assertIn("guardar_imagen(archivo.file", body)
+
 if __name__ == "__main__":
     unittest.main()
