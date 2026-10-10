@@ -77,6 +77,19 @@ class DatabaseFlowTests(unittest.TestCase):
             self.assertEqual(product.stock, 7)
             self.assertEqual(str(payment.monto), "1500.00")
             self.assertEqual(payment.suscripcion_id, subscription_id)
+
+            # La validacion usa compare-and-set para que solicitudes simultaneas
+            # basadas en el estado antiguo no puedan aplicar el mismo cambio.
+            primer_cambio = db(
+                (db.pago.id == payment_id) & (db.pago.estado == "pendiente")
+            ).update(estado="validado")
+            segundo_cambio = db(
+                (db.pago.id == payment_id) & (db.pago.estado == "pendiente")
+            ).update(estado="rechazado")
+            self.assertEqual(primer_cambio, 1)
+            self.assertEqual(segundo_cambio, 0)
+            self.assertEqual(db.pago[payment_id].estado, "validado")
+            db.commit()
         finally:
             if payment_id:
                 db(db.pago.id == payment_id).delete()
