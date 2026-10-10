@@ -1893,14 +1893,16 @@ def superadmin_cambiar_rol(usuario_id):
     if not usuario:
         return respuesta_json(exito=False, mensaje="Usuario no encontrado")
 
-    # Reemplazar roles: quitar los anteriores de la lista permitida y asignar el nuevo
-    for r in ["superadmin", "comerciante", "visitante"]:
-        if r != nuevo_rol:
-            try:
+    # Reemplazar roles en una transaccion para evitar estados parciales.
+    try:
+        for r in ["superadmin", "comerciante", "visitante"]:
+            if r != nuevo_rol:
                 roles_tags.remove(usuario_id, r)
-            except Exception:
-                pass
-    asignar_rol(usuario_id, nuevo_rol)
+        asignar_rol(usuario_id, nuevo_rol)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el rol", codigo=500)
 
     return respuesta_json(exito=True, mensaje="Rol actualizado")
 
@@ -2177,8 +2179,9 @@ def superadmin_guardar_configuracion():
             )
         db.commit()
         return respuesta_json(exito=True, mensaje="Configuracion guardada")
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo guardar la configuracion", codigo=500)
 
 
 # ============================================================
