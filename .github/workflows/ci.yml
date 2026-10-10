@@ -123,6 +123,12 @@ jobs:
 
               protected_routes = [
                   (
+                      "order acceptance",
+                      "/catalogo_cuba/catalogo_cuba/admin/pedidos/1/estado",
+                      b'{"estado":"aceptado"}',
+                      "application/json",
+                  ),
+                  (
                       "payment validation",
                       "/catalogo_cuba/catalogo_cuba/superadmin/pago/validar/1",
                       b"estado=validado",
@@ -175,8 +181,30 @@ jobs:
                           % (label, protected_status)
                       )
                   blocked_statuses.append("%s=%s" % (label, protected_status))
+              # La ruta pública de pedidos debe responder con un error de validación
+              # controlado (400), no con un error interno, ante un UUID inválido.
+              invalid_order = urllib.request.Request(
+                  base + "/catalogo_cuba/catalogo_cuba/api/negocio/slug-no-importa/pedidos",
+                  data=b'{"client_uuid":"no-es-uuid"}',
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  invalid_order_response = client.open(invalid_order, timeout=5)
+                  invalid_order_status = invalid_order_response.getcode()
+                  invalid_order_body = invalid_order_response.read().decode("utf-8", errors="replace")
+              except urllib.error.HTTPError as exc:
+                  invalid_order_status = exc.code
+                  invalid_order_body = exc.read().decode("utf-8", errors="replace")
+              if invalid_order_status != 400:
+                  raise AssertionError(
+                      "Invalid public order payload should return HTTP 400, got HTTP %s: %s"
+                      % (invalid_order_status, invalid_order_body[-1000:])
+                  )
+
               print(
-                  "HTTP smoke test passed: public route HTTP 200; protected unauthenticated POSTs blocked: %s"
+                  "HTTP smoke test passed: public route HTTP 200; invalid order payload HTTP 400; "
+                  "protected unauthenticated POSTs blocked: %s"
                   % ", ".join(blocked_statuses)
               )
           finally:
