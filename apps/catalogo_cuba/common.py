@@ -11,10 +11,9 @@ from datetime import datetime, timedelta
 
 from PIL import Image, ImageOps
 
-from py4web import Session, response
+from py4web import DAL, Field, Session, response
 from py4web.utils.auth import Auth
 from py4web.utils.form import FormStyleBulma
-from pydal import DAL, Field
 from pydal.tools.tags import Tags
 
 from . import settings
