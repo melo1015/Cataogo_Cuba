@@ -29,3 +29,8 @@ jobs:
         run: python -c "import catalogo_cuba; print('CatalogoCuba import OK')"
       - name: Check service worker JavaScript syntax
         run: node --check apps/catalogo_cuba/static/sw.js
+      - name: Run application schema smoke tests
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          PYTHONPATH: apps
+        run: python -m unittest discover -s apps/catalogo_cuba/tests -v
