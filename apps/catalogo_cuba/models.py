@@ -281,14 +281,26 @@ db.define_table(
 # HOOKS DE AUTH
 # ============================================================
 
-@auth.on_signup
-def _on_signup(user):
-    """Asigna rol 'visitante' y fecha_registro al nuevo usuario."""
+def _on_signup(form, user):
+    """Asigna rol 'visitante' y fecha_registro al usuario recién registrado."""
     try:
-        user.update_record(fecha_registro=datetime.utcnow())
-        asignar_rol(user["id"], "visitante")
+        # py4web invoca on_accept['register'] con (form, user); en el flujo
+        # estándar de registro, user puede ser None, así que resolvemos por email.
+        email = (form.vars.get("email") or "").strip().lower()
+        if not email:
+            return
+        registro = db(db.auth_user.email == email).select(db.auth_user.id).first()
+        if not registro:
+            return
+        db(db.auth_user.id == registro.id).update(fecha_registro=datetime.utcnow())
+        asignar_rol(registro.id, "visitante")
+        db.commit()
     except Exception as e:
-        print("Error en on_signup: %s" % e)
+        db.rollback()
+        print("Error en callback de registro: %s" % e)
+
+
+auth.on_accept["register"] = _on_signup
 
 
 # ============================================================
