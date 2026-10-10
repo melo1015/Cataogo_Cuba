@@ -181,6 +181,19 @@ jobs:
                           % (label, protected_status)
                       )
                   blocked_statuses.append("%s=%s" % (label, protected_status))
+              # El panel de comerciante debe exigir sesión y no servir el dashboard
+              # directamente a visitantes anónimos.
+              try:
+                  dashboard_response = client.open(base + "/catalogo_cuba/catalogo_cuba/admin", timeout=5)
+                  dashboard_status = dashboard_response.getcode()
+              except urllib.error.HTTPError as exc:
+                  dashboard_status = exc.code
+              if dashboard_status not in (302, 303, 401, 403):
+                  raise AssertionError(
+                      "Unauthenticated merchant dashboard should be protected, got HTTP %s"
+                      % dashboard_status
+                  )
+
               # La ruta pública de pedidos debe responder con un error de validación
               # controlado (400), no con un error interno, ante un UUID inválido.
               invalid_order = urllib.request.Request(
@@ -203,9 +216,9 @@ jobs:
                   )
 
               print(
-                  "HTTP smoke test passed: public route HTTP 200; invalid order payload HTTP 400; "
-                  "protected unauthenticated POSTs blocked: %s"
-                  % ", ".join(blocked_statuses)
+                  "HTTP smoke test passed: public route HTTP 200; merchant dashboard protected (HTTP %s); "
+                  "invalid order payload HTTP 400; protected unauthenticated POSTs blocked: %s"
+                  % (dashboard_status, ", ".join(blocked_statuses))
               )
           finally:
               server.terminate()
