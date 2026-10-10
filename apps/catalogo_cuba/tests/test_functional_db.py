@@ -13,7 +13,7 @@ from catalogo_cuba.common import db
 class DatabaseFlowTests(unittest.TestCase):
     def test_business_product_subscription_and_payment_round_trip(self):
         suffix = uuid4().hex[:12]
-        user_id = business_id = category_id = product_id = subscription_id = payment_id = None
+        user_id = business_id = category_id = product_id = subscription_id = payment_id = order_id = order_item_id = None
         try:
             user_id = db.auth_user.insert(
                 email="ci-%s@example.invalid" % suffix,
@@ -79,6 +79,51 @@ class DatabaseFlowTests(unittest.TestCase):
             self.assertEqual(str(payment.monto), "1500.00")
             self.assertEqual(payment.suscripcion_id, subscription_id)
 
+            # Pedido público: snapshot del precio y clave idempotente persistente.
+            order_uuid = str(uuid4())
+            order_id = db.pedido.insert(
+                client_uuid=order_uuid,
+                negocio_id=business_id,
+                cliente_nombre="Cliente CI",
+                cliente_telefono="+5350000000",
+                estado="pendiente_revision",
+                moneda="CUP",
+                total="25.00",
+                fecha_creacion=now,
+            )
+            order_item_id = db.pedido_item.insert(
+                pedido_id=order_id,
+                producto_id=product_id,
+                nombre_producto="Producto de prueba",
+                cantidad=2,
+                precio_unitario="12.50",
+                subtotal="25.00",
+            )
+            db.commit()
+            self.assertEqual(db.pedido[order_id].client_uuid, order_uuid)
+            self.assertEqual(db.pedido[order_id].negocio_id, business_id)
+            self.assertEqual(str(db.pedido[order_id].total), "25.00")
+            self.assertEqual(db.pedido_item[order_item_id].cantidad, 2)
+
+            duplicate_order_rejected = False
+            try:
+                db.pedido.insert(
+                    client_uuid=order_uuid,
+                    negocio_id=business_id,
+                    cliente_nombre="Cliente duplicado",
+                    cliente_telefono="+5350000000",
+                    estado="pendiente_revision",
+                    moneda="CUP",
+                    total="25.00",
+                    fecha_creacion=now,
+                )
+                db.commit()
+            except Exception:
+                duplicate_order_rejected = True
+                db.rollback()
+            self.assertTrue(duplicate_order_rejected, "La base de datos acepto un pedido duplicado")
+            self.assertEqual(db(db.pedido.client_uuid == order_uuid).count(), 1)
+
             # La unicidad en base de datos bloquea referencias duplicadas aun
             # si una solicitud concurrente supera la consulta previa del controlador.
             duplicate_rejected = False
@@ -136,6 +181,10 @@ class DatabaseFlowTests(unittest.TestCase):
             )
             db.commit()
         finally:
+            if order_item_id:
+                db(db.pedido_item.id == order_item_id).delete()
+            if order_id:
+                db(db.pedido.id == order_id).delete()
             if payment_id:
                 db(db.pago.id == payment_id).delete()
             if subscription_id:
