@@ -69,13 +69,13 @@ jobs:
           base = "http://127.0.0.1:8765"
           server = subprocess.Popen(
               [
-                  sys.executable, "-m", "py4web", "run",
+                  "py4web", "run",
                   "--host", "127.0.0.1", "--port", "8765",
                   "--app_names", "catalogo_cuba", "--server", "wsgiref",
                   "--quiet", "--watch", "off", "apps",
               ],
               stdout=subprocess.DEVNULL,
-              stderr=subprocess.DEVNULL,
+              stderr=subprocess.PIPE,
               env=os.environ.copy(),
           )
 
@@ -88,7 +88,11 @@ jobs:
               last_error = None
               for _ in range(40):
                   if server.poll() is not None:
-                      raise RuntimeError("py4web server exited before becoming ready")
+                      startup_output = server.stderr.read().decode("utf-8", errors="replace")
+                      raise RuntimeError(
+                          "py4web server exited before becoming ready. Startup output: %s"
+                          % startup_output[-6000:]
+                      )
                   try:
                       response = client.open(base + "/catalogo_cuba/catalogo_cuba", timeout=2)
                       status = response.getcode()
