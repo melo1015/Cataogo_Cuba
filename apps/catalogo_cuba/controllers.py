@@ -713,12 +713,14 @@ def api_crear_pedido(slug):
         db.rollback()
         # Una carrera entre reintentos puede perder la restriccion UNIQUE.
         existente = db(db.pedido.client_uuid == client_uuid).select().first()
-        if existente:
+        if existente and existente.negocio_id == negocio.id:
             return respuesta_json(
                 exito=True,
                 mensaje="Pedido ya recibido anteriormente",
                 datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
             )
+        if existente:
+            return respuesta_json(exito=False, mensaje="Identificador ya utilizado", codigo=409)
         return respuesta_json(exito=False, mensaje="No se pudo guardar el pedido; puedes reintentar con el mismo identificador", codigo=500)
 
     return respuesta_json(
