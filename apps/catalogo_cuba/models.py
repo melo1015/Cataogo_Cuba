@@ -282,6 +282,38 @@ db.define_table(
 )
 
 # ============================================================
+# PEDIDOS PUBLICOS (idempotentes para reintentos offline)
+# ============================================================
+
+db.define_table(
+    "pedido",
+    Field("client_uuid", "string", length=36, unique=True, notnull=True,
+          label="Identificador idempotente del cliente"),
+    Field("negocio_id", "reference negocio", notnull=True, label="Negocio"),
+    Field("cliente_nombre", "string", length=120, notnull=True, label="Nombre del cliente"),
+    Field("cliente_telefono", "string", length=40, notnull=True, label="Telefono del cliente"),
+    Field("direccion_entrega", "string", length=300, default="", label="Direccion de entrega"),
+    Field("notas", "text", default="", label="Notas del pedido"),
+    Field("estado", "string", length=30, default="pendiente_revision", notnull=True,
+          label="Estado del pedido"),
+    Field("moneda", "string", length=10, notnull=True, label="Moneda del pedido"),
+    Field("total", "decimal(12,2)", notnull=True, label="Total calculado por servidor"),
+    Field("fecha_creacion", "datetime", default=None, label="Fecha de creacion"),
+    format="Pedido %(id)s",
+)
+
+db.define_table(
+    "pedido_item",
+    Field("pedido_id", "reference pedido", notnull=True, label="Pedido"),
+    Field("producto_id", "reference producto", notnull=True, label="Producto"),
+    Field("nombre_producto", "string", length=200, notnull=True, label="Nombre al realizar pedido"),
+    Field("cantidad", "integer", notnull=True, label="Cantidad solicitada"),
+    Field("precio_unitario", "decimal(10,2)", notnull=True, label="Precio verificado"),
+    Field("subtotal", "decimal(12,2)", notnull=True, label="Subtotal calculado"),
+    format="%(nombre_producto)s x %(cantidad)s",
+)
+
+# ============================================================
 # HOOKS DE AUTH
 # ============================================================
 
