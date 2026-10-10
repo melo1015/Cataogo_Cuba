@@ -67,7 +67,6 @@ class AuthorizationContractTests(unittest.TestCase):
     def test_public_order_api_calculates_prices_on_server(self):
         body = controller_function(self.source, "api_crear_pedido")
         self.assertIn("Decimal(str(producto.precio or \"0\"))", body)
-        self.assertIn("Field", body) if False else None
         self.assertIn("producto.stock or 0", body)
         self.assertIn("Solicitud recibida; el negocio debe confirmar disponibilidad", body)
 
