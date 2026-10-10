@@ -731,6 +731,80 @@ def api_crear_pedido(slug):
     )
 
 
+@action("catalogo_cuba/admin/pedidos/<pedido_id>/estado", method=["POST"])
+@action.uses(db)
+def admin_actualizar_estado_pedido(pedido_id):
+    """Acepta o rechaza pedidos; la aceptacion descuenta stock de forma condicional."""
+    user = auth.get_user()
+    if not user or not es_comerciante(user):
+        return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
+
+    try:
+        pedido_id = int(pedido_id)
+    except (TypeError, ValueError, OverflowError):
+        return respuesta_json(exito=False, mensaje="Pedido no valido", codigo=400)
+    data = request.json
+    if pedido_id <= 0 or not isinstance(data, dict):
+        return respuesta_json(exito=False, mensaje="Solicitud invalida", codigo=400)
+    nuevo_estado = data.get("estado")
+    if nuevo_estado not in ("aceptado", "rechazado"):
+        return respuesta_json(exito=False, mensaje="Estado no permitido", codigo=400)
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
+    pedido = db(
+        (db.pedido.id == pedido_id) &
+        (db.pedido.negocio_id == negocio.id)
+    ).select().first()
+    if not pedido:
+        return respuesta_json(exito=False, mensaje="Pedido no encontrado", codigo=404)
+    if pedido.estado != "pendiente_revision":
+        return respuesta_json(exito=False, mensaje="El pedido ya fue procesado", codigo=409)
+
+    try:
+        if nuevo_estado == "aceptado":
+            lineas = db(db.pedido_item.pedido_id == pedido.id).select()
+            if not lineas:
+                return respuesta_json(exito=False, mensaje="El pedido no contiene productos", codigo=409)
+            # UPDATE condicional: la base de datos solo descuenta si sigue
+            # habiendo unidades suficientes. Si una linea falla, se revierte todo.
+            for linea in lineas:
+                actualizado = db(
+                    (db.producto.id == linea.producto_id) &
+                    (db.producto.negocio_id == negocio.id) &
+                    (db.producto.disponible == True) &
+                    (db.producto.stock >= linea.cantidad)
+                ).update(stock=db.producto.stock - linea.cantidad)
+                if actualizado != 1:
+                    db.rollback()
+                    return respuesta_json(
+                        exito=False,
+                        mensaje="Stock insuficiente o producto no disponible: %s" % linea.nombre_producto,
+                        codigo=409,
+                    )
+
+        # Compare-and-set del estado: solo una peticion puede procesar el pedido.
+        cambiado = db(
+            (db.pedido.id == pedido.id) &
+            (db.pedido.negocio_id == negocio.id) &
+            (db.pedido.estado == "pendiente_revision")
+        ).update(estado=nuevo_estado)
+        if cambiado != 1:
+            db.rollback()
+            return respuesta_json(exito=False, mensaje="El pedido ya fue procesado por otra solicitud", codigo=409)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el pedido", codigo=500)
+
+    return respuesta_json(
+        exito=True,
+        mensaje=("Pedido aceptado y stock actualizado" if nuevo_estado == "aceptado" else "Pedido rechazado"),
+        datos={"pedido_id": pedido.id, "estado": nuevo_estado},
+    )
+
+
 # ============================================================
 # PANEL DE COMERCIANTE
 # ============================================================
