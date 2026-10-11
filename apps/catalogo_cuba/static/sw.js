@@ -70,12 +70,20 @@ self.addEventListener('fetch', event => {
     // Solo manejar peticiones del mismo origen o de la app
     if (!url.pathname.startsWith('/catalogo_cuba')) return;
     
-    // 1. API endpoints (catalogo JSON) - Network-first con cache
+    // No guardar respuestas personalizadas en Cache Storage. Las APIs privadas
+    // (notificaciones, administración, etc.) deben ir siempre a la red.
+    if (/\/(admin|superadmin|auth)(\/|$)/i.test(url.pathname) ||
+        /\/api\/(notificaciones|notificacion|inventario)(\/|$)/i.test(url.pathname)) {
+        return;
+    }
+
+    // 1. Solo cachear APIs públicas del catálogo. No cachear otras APIs.
     if (url.pathname.includes('/api/')) {
+        if (!url.pathname.includes('/api/negocio/')) return;
         event.respondWith(networkFirst(request, API_CACHE));
         return;
     }
-    
+
     // 2. Imagenes subidas - Cache-first
     if (url.pathname.includes('/uploads/')) {
         event.respondWith(cacheFirst(request, IMAGE_CACHE));
