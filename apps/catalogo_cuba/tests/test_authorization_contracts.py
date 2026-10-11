@@ -73,6 +73,10 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("producto.stock or 0", body)
         self.assertIn("Solicitud recibida; el negocio debe confirmar disponibilidad", body)
 
+    def test_order_state_route_loads_session_and_authenticated_user(self):
+        marker = '@action("catalogo_cuba/admin/pedidos/<pedido_id>/estado", method=["POST"])\n@action.uses(session, auth.user, db)\ndef admin_actualizar_estado_pedido('
+        self.assertIn(marker, self.source)
+
     def test_order_acceptance_is_owned_and_uses_conditional_stock_update(self):
         body = controller_function(self.source, "admin_actualizar_estado_pedido")
         self.assertIn("not es_comerciante(user)", body)
