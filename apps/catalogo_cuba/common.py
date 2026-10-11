@@ -55,6 +55,9 @@ auth = Auth(
 
 auth.param.registration_requires_confirmation = settings.AUTH_REGISTRATION_REQUIRES_CONFIRMATION
 
+# Registra las rutas oficiales de autenticación de py4web (/auth/login, /auth/register, etc.).
+auth.enable()
+
 # ============================================================
 # AUTORIZACION MEDIANTE TAGS (mecanismo oficial de py4web)
 # ============================================================
