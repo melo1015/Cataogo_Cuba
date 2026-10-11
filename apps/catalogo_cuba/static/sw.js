@@ -9,10 +9,10 @@
  * - CSS/JS: Cache-first
  */
 
-const CACHE_NAME = 'catalogocuba-v1';
-const STATIC_CACHE = 'catalogocuba-static-v1';
-const IMAGE_CACHE = 'catalogocuba-images-v1';
-const API_CACHE = 'catalogocuba-api-v1';
+const CACHE_NAME = 'catalogocuba-v2';
+const STATIC_CACHE = 'catalogocuba-static-v2';
+const IMAGE_CACHE = 'catalogocuba-images-v2';
+const API_CACHE = 'catalogocuba-api-v2';
 
 // Recursos estaticos criticos para cachear inmediatamente
 const PRECACHE_ASSETS = [
@@ -163,13 +163,22 @@ async function networkFirst(request, cacheName) {
  * Stale-while-revalidate: Sirve del cache inmediatamente, actualiza en background
  * Ideal para paginas HTML
  */
+function respuestaCacheable(response) {
+    const control = (response.headers.get('Cache-Control') || '').toLowerCase();
+    return !control.includes('no-store') && !control.includes('private');
+}
+
 async function staleWhileRevalidate(request, cacheName) {
     const cache = await caches.open(cacheName);
     const cached = await cache.match(request);
-    
+
     const fetchPromise = fetch(request).then(networkResponse => {
-        if (networkResponse.ok) {
+        if (networkResponse.ok && respuestaCacheable(networkResponse)) {
             cache.put(request, networkResponse.clone());
+        } else if (!respuestaCacheable(networkResponse)) {
+            // Eliminar una copia anterior si el servidor ahora marca la página
+            // como privada/no-store (por ejemplo, tras iniciar sesión).
+            cache.delete(request);
         }
         return networkResponse;
     }).catch(async () => {
