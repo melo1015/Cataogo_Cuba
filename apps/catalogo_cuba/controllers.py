@@ -1286,52 +1286,6 @@ def admin_categoria_editar(categoria_id):
     if not categoria:
         raise HTTP(404)
 
-    form = Form(db.categoria, record=categoria,
-                fields=["nombre", "descripcion", "imagen", "orden", "activa"],
-                deletable=True, formstyle=FormStyleBulma)
-
-    if form.accepted:
-        if not form.deleted:
-            slug_base = slugify(form.vars.get("nombre", categoria.nombre)) or "categoria"
-            slug = slug_base
-            contador = 1
-            while db(
-                (db.categoria.negocio_id == negocio.id) &
-                (db.categoria.slug == slug) &
-                (db.categoria.id != categoria_id)
-            ).count() > 0:
-                slug = "%s-%d" % (slug_base, contador)
-                contador += 1
-            db(db.categoria.id == categoria_id).update(slug=slug)
-            db.commit()
-        redirect(URL("catalogo_cuba", "admin", "categorias"))
-
-    return dict(form=form, negocio=negocio, categoria=categoria,
-                modo="editar", titulo="Editar: %s" % categoria.nombre)
-
-
-# ============================================================
-# INVENTARIO
-# ============================================================
-
-@action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
-@action.uses("admin_categoria_form.html", *AccionBase)
-def admin_categoria_editar(categoria_id):
-    _rechazar_uploads_excesivos(["imagen"])
-    user = auth.get_user()
-    if not user or not es_comerciante(user):
-        raise HTTP(403)
-
-    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
-    if not negocio:
-        raise HTTP(403)
-
-    categoria = db(
-        (db.categoria.id == categoria_id) & (db.categoria.negocio_id == negocio.id)
-    ).select().first()
-    if not categoria:
-        raise HTTP(404)
-
     campos = ["nombre", "descripcion", "imagen", "orden", "activa"]
     form = Form(
         [getattr(db.categoria, nombre) for nombre in campos],
@@ -1364,6 +1318,12 @@ def admin_categoria_editar(categoria_id):
 
     return dict(form=form, negocio=negocio, categoria=categoria, modo="editar",
                 titulo="Editar: %s" % categoria.nombre)
+
+
+
+# ============================================================
+# INVENTARIO
+# ============================================================
 
 @action("catalogo_cuba/admin/inventario")
 @action.uses("admin_inventario.html", *AccionBase)
