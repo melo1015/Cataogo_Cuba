@@ -71,6 +71,14 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("not es_superadmin()", body)
         self.assertIn("aprobado=True, activo=True", body)
 
+    def test_public_order_api_limits_request_body_before_json_parse(self):
+        body = controller_function(self.source, "api_crear_pedido")
+        self.assertLess(body.index('request.environ.get("CONTENT_LENGTH"'), body.index("data = request.json"))
+        self.assertIn("settings.MAX_ORDER_REQUEST_SIZE", body)
+        self.assertIn('codigo=413', body)
+        settings = (APP_DIR / "settings.py").read_text(encoding="utf-8")
+        self.assertIn("MAX_ORDER_REQUEST_SIZE = 64 * 1024", settings)
+
     def test_public_order_api_is_idempotent_and_scoped_to_business(self):
         body = controller_function(self.source, "api_crear_pedido")
         self.assertIn("uuid.UUID", body)
