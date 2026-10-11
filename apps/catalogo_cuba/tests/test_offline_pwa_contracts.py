@@ -44,6 +44,12 @@ class OfflinePwaContractTests(unittest.TestCase):
         self.assertIn("client_uuid: uuid()", self.catalog)
         self.assertIn("db(db.pedido.client_uuid == client_uuid)", self.controllers)
 
+    def test_authenticated_html_is_marked_private_and_not_stored(self):
+        self.assertIn('response.headers["Cache-Control"] = "private, no-store"', self.controllers)
+        self.assertIn("function respuestaCacheable(response)", self.sw)
+        self.assertIn("!control.includes('no-store') && !control.includes('private')", self.sw)
+        self.assertIn("catalogocuba-static-v2", self.sw)
+
     def test_private_pages_and_authenticated_apis_are_never_cached(self):
         self.assertIn("(admin|superadmin|auth)", self.sw)
         self.assertIn("(notificaciones|notificacion|inventario)", self.sw)
