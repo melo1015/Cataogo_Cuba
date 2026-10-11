@@ -191,6 +191,16 @@ def main():
         client_a = login(email_a)
         client_b = login(email_b)
 
+        # A merchant must not access superadmin functions, and anonymous users
+        # must not access the merchant panel.
+        anonymous = urllib.request.build_opener()
+        status, _ = request(anonymous, CRUD_PREFIX)
+        if status not in (302, 303, 401, 403):
+            raise AssertionError("Anonymous merchant-panel access was not denied: HTTP %s" % status)
+        status, _ = request(client_a, APP_PREFIX + "/catalogo_cuba/superadmin")
+        if status != 403:
+            raise AssertionError("Merchant session must be denied superadmin dashboard, got HTTP %s" % status)
+
         # Own create/edit pages must be accessible to an authenticated merchant.
         for path in (
             CRUD_PREFIX + "/producto/nuevo",
@@ -223,6 +233,21 @@ def main():
             "negocio_id": str(seeded["b"][2]),
             "slug": "slug-controlado-por-cliente",
         })
+        # Missing or hostile Origin/Referer must be rejected before writes.
+        hostile_payload = dict(category_payload)
+        hostile_payload["nombre"] = "Categoria CSRF no permitida"
+        hostile_data = urllib.parse.urlencode(hostile_payload, doseq=True).encode()
+        status, _ = request(
+            client_a, category_path, data=hostile_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "Origin": "https://attacker.invalid"},
+        )
+        if status != 403:
+            raise AssertionError("Cross-origin category POST should return 403, got HTTP %s" % status)
+        if db((db.categoria.negocio_id == seeded["a"][2]) &
+              (db.categoria.nombre == "Categoria CSRF no permitida")).count():
+            raise AssertionError("Cross-origin POST created a category despite rejection")
+
         status, body = post_form(client_a, category_path, category_payload)
         if status not in (200, 302, 303):
             if status >= 500:
