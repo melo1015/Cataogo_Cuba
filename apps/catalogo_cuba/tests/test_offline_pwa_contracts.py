@@ -22,7 +22,7 @@ class OfflinePwaContractTests(unittest.TestCase):
     def test_service_worker_is_served_from_app_root_with_wide_scope_header(self):
         self.assertIn('@action("catalogo_cuba/sw.js", method=["GET"])', self.controllers)
         self.assertIn('response.headers["Service-Worker-Allowed"] = "/catalogo_cuba/"', self.controllers)
-        self.assertIn("URL('sw.js')", self.layout)
+        self.assertIn("URL('catalogo_cuba', 'sw.js')", self.layout)
         self.assertIn("{ scope: '/catalogo_cuba/' }", self.layout)
         self.assertNotIn("URL('static', 'sw.js')", self.layout)
 
@@ -34,6 +34,8 @@ class OfflinePwaContractTests(unittest.TestCase):
 
     def test_offline_orders_retry_only_while_pending(self):
         self.assertIn("indexedDB.open('catalogocuba-orders-v1', 1)", self.sw)
+        manifest = (APP / "static" / "manifest.json").read_text(encoding="utf-8")
+        self.assertIn('"start_url": "/catalogo_cuba/catalogo_cuba"', manifest)
         self.assertIn("event.tag === 'sync-catalogo'", self.sw)
         self.assertRegex(
             self.catalog,
