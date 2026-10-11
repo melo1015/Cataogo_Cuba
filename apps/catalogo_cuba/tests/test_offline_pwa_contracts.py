@@ -44,6 +44,11 @@ class OfflinePwaContractTests(unittest.TestCase):
         self.assertIn("client_uuid: uuid()", self.catalog)
         self.assertIn("db(db.pedido.client_uuid == client_uuid)", self.controllers)
 
+    def test_private_pages_and_authenticated_apis_are_never_cached(self):
+        self.assertIn("/(admin|superadmin|auth)", self.sw)
+        self.assertIn("/api/(notificaciones|notificacion|inventario)", self.sw)
+        self.assertIn("if (!url.pathname.includes('/api/negocio/')) return;", self.sw)
+
     def test_catalogue_keeps_local_copy_without_overwriting_with_error_payload(self):
         self.assertIn("localStorage.setItem('catalogo_' + slug, JSON.stringify(data))", self.catalog)
         self.assertIn("Una respuesta offline incompleta no debe reemplazar", self.catalog)
