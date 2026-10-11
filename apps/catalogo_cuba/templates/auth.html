@@ -1,22 +1,17 @@
-[[# auth.html]]
 [[extend 'layout.html']]
 
 [[block main]]
 <div class="container mt-3" style="max-width:480px;margin:0 auto">
     <h1 style="font-size:1.3rem;margin-bottom:1rem;text-align:center">
-        [[=titulo_auth or 'Acceso']]
+        Acceso a CatalogoCuba
     </h1>
     <div class="card">
         [[=form]]
     </div>
     <p class="text-sm text-center mt-2">
-        [[if request.function == 'login':]]
-            ¿No tienes cuenta? <a href="[[=URL('auth', 'register')]]">Registrate</a>
-        [[else:]]
-            [[if request.function == 'register':]]
-                ¿Ya tienes cuenta? <a href="[[=URL('auth', 'login')]]">Inicia sesion</a>
-            [[pass]]
-        [[pass]]
+        <a href="[[=URL('auth', 'login')]]">Iniciar sesión</a>
+        <span aria-hidden="true"> · </span>
+        <a href="[[=URL('auth', 'register')]]">Crear una cuenta</a>
     </p>
 </div>
 [[end]]
