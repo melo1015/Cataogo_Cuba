@@ -52,6 +52,13 @@ DIAS_PRUEBA_GRATIS = 30
 MAX_IMAGE_SIZE = 2 * 1024 * 1024
 # Limite del JSON enviado a la API publica de pedidos (antes del parseo).
 MAX_ORDER_REQUEST_SIZE = 64 * 1024
+# IPs exactas de proxies inversos confiables, separadas por coma.
+# Ejemplo: CATALOGO_CUBA_TRUSTED_PROXY_IPS=127.0.0.1,10.0.0.10
+# Dejar vacio si la app no recibe trafico desde un proxy confiable.
+TRUSTED_PROXY_IPS = tuple(
+    ip.strip() for ip in os.environ.get("CATALOGO_CUBA_TRUSTED_PROXY_IPS", "").split(",")
+    if ip.strip()
+)
 IMAGE_THUMBNAIL_SIZE = (300, 300)
 IMAGE_MEDIUM_SIZE = (600, 600)
 IMAGE_QUALITY = 75
