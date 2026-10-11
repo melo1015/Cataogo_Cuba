@@ -18,6 +18,7 @@ const API_CACHE = 'catalogocuba-api-v1';
 const PRECACHE_ASSETS = [
     '/catalogo_cuba/',
     '/catalogo_cuba/static/manifest.json',
+    '/catalogo_cuba/static/offline.html',
 ];
 
 // ============================================================
@@ -163,8 +164,18 @@ async function staleWhileRevalidate(request, cacheName) {
             cache.put(request, networkResponse.clone());
         }
         return networkResponse;
-    }).catch(() => cached);
-    
+    }).catch(async () => {
+        if (cached) return cached;
+        // Navegación no visitada anteriormente: muestra una pantalla offline
+        // explícita en lugar de devolver null y dejar fallar la navegación.
+        return (await cache.match('/catalogo_cuba/static/offline.html')) ||
+            new Response('Sin conexión. Abre una página visitada previamente.', {
+                status: 503,
+                statusText: 'Offline',
+                headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+            });
+    });
+
     return cached || fetchPromise;
 }
 
