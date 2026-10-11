@@ -251,6 +251,22 @@ def main():
         if notification_after.leida:
             raise AssertionError("Merchant A marked Merchant B notification as read")
 
+        # The owning merchant must be able to accept its own order after the
+        # cross-tenant attempts; successful acceptance decrements stock once.
+        status, body = request(
+            client_b,
+            APP_PREFIX + "/catalogo_cuba/admin/pedidos/%s/estado" % order_b_id,
+            data=b'{"estado":"aceptado"}',
+            headers={"Content-Type": "application/json", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin"},
+        )
+        if status != 200:
+            raise AssertionError("Owner should be able to accept own order, got HTTP %s: %s" % (status, body[-500:]))
+        order_after_owner = db(db.pedido.id == order_b_id).select().first()
+        stock_after_owner = db(db.producto.id == product_b_id).select().first().stock
+        if order_after_owner.estado != "aceptado" or stock_after_owner != stock_before - 1:
+            raise AssertionError("Owner acceptance did not update order and decrement stock exactly once")
+
         # A merchant must not access superadmin functions, and anonymous users
         # must not access the merchant panel.
         class NoRedirect(urllib.request.HTTPRedirectHandler):
