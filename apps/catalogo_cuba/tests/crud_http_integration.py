@@ -218,6 +218,10 @@ def main():
             "descripcion": "Integracion",
             "orden": "0",
             "activa": "on",
+            # These fields are deliberately not part of the form; they must not
+            # let the browser choose tenant ownership or a public slug.
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "slug-controlado-por-cliente",
         })
         status, body = post_form(client_a, category_path, category_payload)
         if status not in (200, 302, 303):
@@ -235,6 +239,29 @@ def main():
         ).select().first()
         if not created_category:
             raise AssertionError("Category POST returned without creating an owned category")
+        if created_category.negocio_id != seeded["a"][2]:
+            raise AssertionError("Tampered negocio_id changed category ownership")
+        if created_category.slug == "slug-controlado-por-cliente":
+            raise AssertionError("Tampered slug was trusted instead of generated server-side")
+
+        # Exercise category edit POST and prove tenant fields remain server-owned.
+        category_edit_path = CRUD_PREFIX + "/categoria/editar/%s" % created_category.id
+        category_edit_payload = form_payload(client_a, category_edit_path, {
+            "nombre": "Categoria editada por HTTP",
+            "descripcion": "Actualizada por prueba",
+            "orden": "2",
+            "activa": "on",
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "slug-manipulado-edicion",
+        })
+        status, body = post_form(client_a, category_edit_path, category_edit_payload)
+        if status not in (200, 302, 303):
+            raise AssertionError("Category edit POST failed: HTTP %s %s" % (status, body[-1000:]))
+        updated_category = db(db.categoria.id == created_category.id).select().first()
+        if (not updated_category or updated_category.nombre != "Categoria editada por HTTP"
+                or updated_category.negocio_id != seeded["a"][2]
+                or updated_category.slug == "slug-manipulado-edicion"):
+            raise AssertionError("Category edit did not preserve server-side ownership/slug")
 
         # A foreign category must be rejected by the product form validator.
         product_path = CRUD_PREFIX + "/producto/nuevo"
@@ -255,6 +282,8 @@ def main():
             "tags": "",
             "peso": "",
             "meta_keywords": "",
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "producto-slug-manipulado",
         })
         status, body = post_form(client_a, product_path, product_payload)
         after_count = db(db.producto.negocio_id == seeded["a"][2]).count()
@@ -284,6 +313,10 @@ def main():
         ).select().first()
         if not created_product:
             raise AssertionError("Product POST returned without creating an owned product")
+        if created_product.negocio_id != seeded["a"][2]:
+            raise AssertionError("Tampered negocio_id changed product ownership")
+        if created_product.slug == "producto-slug-manipulado":
+            raise AssertionError("Tampered product slug was trusted instead of generated server-side")
 
         edit_path = CRUD_PREFIX + "/producto/editar/%s" % created_product.id
         edit_payload = form_payload(client_a, edit_path, {
@@ -302,19 +335,62 @@ def main():
             "tags": "",
             "peso": "",
             "meta_keywords": "",
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "slug-producto-manipulado-edicion",
         })
         status, body = post_form(client_a, edit_path, edit_payload)
         if status not in (200, 302, 303):
             raise AssertionError("Product edit POST failed: HTTP %s %s" % (status, body[-1000:]))
         updated = db(db.producto.id == created_product.id).select().first()
-        if not updated or updated.nombre != "Producto editado por HTTP" or updated.negocio_id != seeded["a"][2]:
-            raise AssertionError("Product edit did not persist correctly within the owning business")
+        if (not updated or updated.nombre != "Producto editado por HTTP"
+                or updated.negocio_id != seeded["a"][2]
+                or updated.slug == "slug-producto-manipulado-edicion"):
+            raise AssertionError("Product edit did not preserve server-side ownership/slug")
 
         # Merchant B's original product must remain untouched.
         untouched = db(db.producto.id == product_b).select().first()
         if not untouched or untouched.nombre != "Producto B" or untouched.negocio_id != seeded["b"][2]:
             raise AssertionError("Merchant A changed Merchant B's product")
-        print("Authenticated CRUD HTTP integration passed: login, category/product create, product edit, foreign category rejection, and cross-tenant 404 isolation.")
+        # Restart the HTTP application and verify the edited records are still
+        # available through authenticated merchant pages backed by the same DB.
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=5)
+        server = subprocess.Popen(
+            [
+                "py4web", "run", "--yes", "--host", "127.0.0.1", "--port", "8766",
+                "--app_names", "catalogo_cuba", "--server", "wsgiref",
+                "--quiet", "--watch", "off", "apps",
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=server_env,
+        )
+        ready = False
+        for _ in range(50):
+            if server.poll() is not None:
+                output = server.stdout.read().decode("utf-8", errors="replace")
+                raise RuntimeError("py4web failed after restart: " + output[-8000:])
+            try:
+                status, _ = request(urllib.request.build_opener(), APP_PREFIX + "/auth/login")
+                if status == 200:
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.4)
+        if not ready:
+            raise RuntimeError("py4web did not become ready after restart")
+        client_a_after_restart = login(email_a)
+        status, product_listing = request(client_a_after_restart, CRUD_PREFIX + "/productos")
+        if status != 200 or "Producto editado por HTTP" not in product_listing:
+            raise AssertionError("Edited product did not persist through application restart")
+        status, category_listing = request(client_a_after_restart, CRUD_PREFIX + "/categorias")
+        if status != 200 or "Categoria editada por HTTP" not in category_listing:
+            raise AssertionError("Edited category did not persist through application restart")
+
+        print("Authenticated CRUD HTTP integration passed: category create/edit, product create/edit, tampered tenant/slug fields ignored, foreign-category rejection, cross-tenant 404 isolation, and persistence after app restart.")
     finally:
         server.terminate()
         try:
