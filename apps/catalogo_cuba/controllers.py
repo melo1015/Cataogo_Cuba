@@ -35,7 +35,8 @@ def get_client_ip():
 def _peticion_mismo_origen():
     """
     Verifica Origin/Referer en endpoints mutables autenticados por cookie.
-    Las Form de py4web conservan su propia proteccion CSRF por token.
+    Si ambos encabezados faltan, rechaza la solicitud. Esta comprobacion
+    depende de la configuracion del proxy y no reemplaza tokens CSRF explícitos.
     """
     host = (request.environ.get("HTTP_HOST") or "").strip().lower()
     origen = (request.environ.get("HTTP_ORIGIN") or "").strip()
@@ -2285,10 +2286,12 @@ def api_marcar_leida(notificacion_id):
     if not user:
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
-    db(
+    actualizadas = db(
         (db.notificacion.id == notificacion_id) &
         (db.notificacion.usuario_id == user["id"])
     ).update(leida=True, fecha_lectura=ahora_cuba())
+    if actualizadas != 1:
+        return respuesta_json(exito=False, mensaje="Notificacion no encontrada", codigo=404)
     db.commit()
     return respuesta_json(exito=True, mensaje="Notificacion marcada como leida")
 
