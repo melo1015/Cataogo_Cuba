@@ -65,6 +65,7 @@ class DatabaseFlowTests(unittest.TestCase):
                 estado="pendiente",
                 referencia="CI-%s" % suffix,
                 referencia_unica="transfermovil:ci-%s" % suffix.casefold(),
+                suscripcion_abierta_id=subscription_id,
                 fecha_solicitud=now,
             )
             db.commit()
@@ -180,12 +181,38 @@ class DatabaseFlowTests(unittest.TestCase):
                 1,
             )
 
+            # Referencias diferentes tampoco pueden abrir dos pagos simultáneos
+            # para la misma suscripción (restricción UNIQUE a nivel de BD).
+            duplicate_open_rejected = False
+            try:
+                db.pago.insert(
+                    suscripcion_id=subscription_id,
+                    negocio_id=business_id,
+                    usuario_id=user_id,
+                    monto="1500.00",
+                    moneda="CUP",
+                    metodo_pago="usdt",
+                    estado="pendiente",
+                    referencia="OTRO-%s" % suffix,
+                    referencia_unica="usdt:otro-%s" % suffix.casefold(),
+                    suscripcion_abierta_id=subscription_id,
+                    fecha_solicitud=now,
+                )
+                db.commit()
+            except Exception:
+                duplicate_open_rejected = True
+                db.rollback()
+            self.assertTrue(
+                duplicate_open_rejected,
+                "La base de datos aceptó dos pagos abiertos de una suscripción",
+            )
+
             # Simular el compare-and-set usado por el controlador. Solo la
             # solicitud que cambia pendiente -> validado puede aplicar el periodo.
             fecha_fin_inicial = db.suscripcion[subscription_id].fecha_fin
             primer_cambio = db(
                 (db.pago.id == payment_id) & (db.pago.estado == "pendiente")
-            ).update(estado="validado")
+            ).update(estado="validado", suscripcion_abierta_id=None)
             if primer_cambio == 1:
                 db(db.suscripcion.id == subscription_id).update(
                     estado="activa",
