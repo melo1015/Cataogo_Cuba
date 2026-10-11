@@ -805,7 +805,7 @@ def api_crear_pedido(slug):
 
 
 @action("catalogo_cuba/admin/pedidos/<pedido_id>/estado", method=["POST"])
-@action.uses(db)
+@action.uses(session, auth.user, db)
 def admin_actualizar_estado_pedido(pedido_id):
     if not _peticion_mismo_origen():
         return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
