@@ -56,6 +56,7 @@ class AuthorizationContractTests(unittest.TestCase):
         validation = controller_function(self.source, "superadmin_validar_pago")
         self.assertIn("len(notas) > 2000", validation)
         self.assertIn('None if estado in ("validado", "rechazado") else pago.suscripcion_id', validation)
+        self.assertIn("Ya existe otro pago abierto para esta suscripción.", validation)
 
     def test_payment_validation_requires_superadmin_and_compare_and_set(self):
         body = controller_function(self.source, "superadmin_validar_pago")
