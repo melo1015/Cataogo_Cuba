@@ -193,7 +193,13 @@ def main():
 
         # A merchant must not access superadmin functions, and anonymous users
         # must not access the merchant panel.
-        anonymous = urllib.request.build_opener()
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            # Preserve the original 302 so the test does not mistake the
+            # redirected login page's HTTP 200 for public dashboard access.
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        anonymous = urllib.request.build_opener(NoRedirect)
         status, _ = request(anonymous, CRUD_PREFIX)
         if status not in (302, 303, 401, 403):
             raise AssertionError("Anonymous merchant-panel access was not denied: HTTP %s" % status)
