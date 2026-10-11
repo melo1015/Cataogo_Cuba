@@ -26,10 +26,28 @@ from .common import (
 # ============================================================
 
 def get_client_ip():
-    return request.environ.get(
-        "HTTP_X_FORWARDED_FOR",
-        request.environ.get("REMOTE_ADDR", "")
-    )
+    """Obtiene la IP cliente sin confiar en cabeceras reenviadas arbitrarias.
+
+    Solo se usa X-Forwarded-For cuando REMOTE_ADDR coincide exactamente con
+    una IP configurada en TRUSTED_PROXY_IPS. El proxy de confianza debe
+    sobrescribir/limpiar esa cabecera y no aceptar valores del cliente sin validar.
+    """
+    remote_addr = (request.environ.get("REMOTE_ADDR") or "").strip()
+    trusted_proxies = getattr(settings, "TRUSTED_PROXY_IPS", ())
+    if remote_addr not in trusted_proxies:
+        return remote_addr
+
+    forwarded = request.environ.get("HTTP_X_FORWARDED_FOR", "")
+    # Con un proxy confiable que sobrescribe la cabecera, el primer valor
+    # representa la IP original del cliente.
+    candidate = forwarded.split(",", 1)[0].strip()
+    if not candidate:
+        return remote_addr
+    try:
+        import ipaddress
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return remote_addr
 
 
 def _peticion_mismo_origen():
