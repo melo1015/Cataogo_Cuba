@@ -109,10 +109,24 @@ def seed():
         nombre="Producto B", slug="producto-b", negocio_id=business_b,
         categoria_id=category_b, precio=20, moneda="CUP", disponible=True, stock=4,
     )
+    order_b = db.pedido.insert(
+        client_uuid="11111111-1111-4111-8111-111111111111",
+        negocio_id=business_b, cliente_nombre="Cliente de prueba",
+        cliente_telefono="5550101", direccion_entrega="", notas="",
+        estado="pendiente_revision", moneda="CUP", total=20,
+    )
+    db.pedido_item.insert(
+        pedido_id=order_b, producto_id=product_b, nombre_producto="Producto B",
+        cantidad=1, precio_unitario=20, subtotal=20,
+    )
+    notification_b = db.notificacion.insert(
+        usuario_id=user_b, tipo="general", titulo="Prueba de aislamiento",
+        mensaje="No debe poder marcarla otro comerciante", leida=False,
+    )
     db.commit()
     return {
         "a": (email_a, user_a, business_a, category_a, product_a),
-        "b": (email_b, user_b, business_b, category_b, product_b),
+        "b": (email_b, user_b, business_b, category_b, product_b, order_b, notification_b),
     }
 
 
@@ -190,6 +204,52 @@ def main():
         email_b, _, _, category_b, product_b = seeded["b"]
         client_a = login(email_a)
         client_b = login(email_b)
+
+        # Cross-tenant mutation attempts must not modify inventory, orders or notifications.
+        business_b_id = seeded["b"][2]
+        product_b_id = seeded["b"][4]
+        order_b_id = seeded["b"][5]
+        notification_b_id = seeded["b"][6]
+        stock_before = db(db.producto.id == product_b_id).select().first().stock
+        status, body = request(
+            client_a,
+            APP_PREFIX + "/catalogo_cuba/api/inventario/actualizar",
+            data=__import__("json").dumps({"producto_id": product_b_id, "stock": 999}).encode(),
+            headers={"Content-Type": "application/json", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin/inventario"},
+        )
+        if status != 404:
+            raise AssertionError("Cross-tenant inventory update should return 404, got HTTP %s: %s" % (status, body[-500:]))
+        stock_after = db(db.producto.id == product_b_id).select().first().stock
+        if stock_after != stock_before:
+            raise AssertionError("Merchant A changed Merchant B inventory")
+
+        status, body = request(
+            client_a,
+            APP_PREFIX + "/catalogo_cuba/admin/pedidos/%s/estado" % order_b_id,
+            data=b'{"estado":"aceptado"}',
+            headers={"Content-Type": "application/json", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin"},
+        )
+        if status != 404:
+            raise AssertionError("Cross-tenant order mutation should return 404, got HTTP %s: %s" % (status, body[-500:]))
+        order_after = db(db.pedido.id == order_b_id).select().first()
+        stock_after_order = db(db.producto.id == product_b_id).select().first().stock
+        if order_after.estado != "pendiente_revision" or stock_after_order != stock_before:
+            raise AssertionError("Merchant A modified Merchant B order or stock")
+
+        status, body = request(
+            client_a,
+            APP_PREFIX + "/catalogo_cuba/api/notificacion/leer/%s" % notification_b_id,
+            data=b"",
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin"},
+        )
+        if status != 404:
+            raise AssertionError("Cross-tenant notification update should return 404, got HTTP %s: %s" % (status, body[-500:]))
+        notification_after = db(db.notificacion.id == notification_b_id).select().first()
+        if notification_after.leida:
+            raise AssertionError("Merchant A marked Merchant B notification as read")
 
         # A merchant must not access superadmin functions, and anonymous users
         # must not access the merchant panel.
