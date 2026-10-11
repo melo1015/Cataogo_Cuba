@@ -335,6 +335,21 @@ def catalogo_home():
     return dict(negocios=negocios, titulo="CatalogoCuba - Directorio de Negocios")
 
 
+# El Service Worker debe servirse desde la raíz de la aplicación para poder
+# controlar las páginas públicas; al servirse desde /static su alcance sería
+# demasiado limitado. El encabezado permite explícitamente el scope de la app.
+@action("catalogo_cuba/sw.js", method=["GET"])
+def service_worker():
+    response.headers["Service-Worker-Allowed"] = "/catalogo_cuba/"
+    response.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    ruta_sw = os.path.join(os.path.dirname(__file__), "static", "sw.js")
+    try:
+        with open(ruta_sw, "r", encoding="utf-8") as archivo:
+            return archivo.read()
+    except OSError:
+        raise HTTP(503, "Service Worker no disponible")
+
+
 @action("catalogo_cuba/negocio/<slug>")
 @action.uses("catalogo_negocio.html", *AccionBase)
 def catalogo_negocio(slug):
