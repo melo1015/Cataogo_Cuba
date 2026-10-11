@@ -71,6 +71,15 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("not es_superadmin()", body)
         self.assertIn("aprobado=True, activo=True", body)
 
+    def test_client_ip_ignores_forwarded_header_unless_remote_is_trusted(self):
+        body = controller_function(self.source, "get_client_ip")
+        self.assertIn('request.environ.get("REMOTE_ADDR")', body)
+        self.assertIn('remote_addr not in trusted_proxies', body)
+        self.assertIn('request.environ.get("HTTP_X_FORWARDED_FOR", "")', body)
+        self.assertIn("ipaddress.ip_address(candidate)", body)
+        settings = (APP_DIR / "settings.py").read_text(encoding="utf-8")
+        self.assertIn("CATALOGO_CUBA_TRUSTED_PROXY_IPS", settings)
+
     def test_public_order_api_limits_request_body_before_json_parse(self):
         body = controller_function(self.source, "api_crear_pedido")
         self.assertLess(body.index('request.environ.get("CONTENT_LENGTH"'), body.index("data = request.json"))
