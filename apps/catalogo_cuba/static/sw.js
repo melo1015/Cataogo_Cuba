@@ -16,7 +16,6 @@ const API_CACHE = 'catalogocuba-api-v2';
 
 // Recursos estaticos criticos para cachear inmediatamente
 const PRECACHE_ASSETS = [
-    '/catalogo_cuba/catalogo_cuba',
     '/catalogo_cuba/static/manifest.json',
     '/catalogo_cuba/static/offline.html',
 ];
