@@ -273,6 +273,17 @@ jobs:
                       % (invalid_order_status, invalid_order_body[-1000:])
                   )
 
+              # El Service Worker debe ser accesible desde la ruta de la aplicación
+              # y autorizar el scope completo que incluye las páginas del catálogo.
+              sw_response = client.open(base + "/catalogo_cuba/catalogo_cuba/sw.js", timeout=5)
+              sw_body = sw_response.read().decode("utf-8", errors="replace")
+              if sw_response.getcode() != 200:
+                  raise AssertionError("Service Worker route should return HTTP 200")
+              if sw_response.headers.get("Service-Worker-Allowed") != "/catalogo_cuba/":
+                  raise AssertionError("Service Worker must authorize scope /catalogo_cuba/")
+              if "self.addEventListener('fetch'" not in sw_body:
+                  raise AssertionError("Service Worker response does not contain fetch handler")
+
               print(
                   "HTTP smoke test passed: public route HTTP 200; merchant dashboard protected (HTTP %s); "
                   "invalid order payload HTTP 400; protected unauthenticated POSTs blocked: %s"
