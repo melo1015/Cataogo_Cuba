@@ -201,7 +201,7 @@ def main():
             raise RuntimeError("py4web did not become ready: %r" % last_error)
 
         email_a, _, _, category_a, product_a = seeded["a"]
-        email_b, _, _, category_b, product_b = seeded["b"]
+        email_b, _, _, category_b, product_b, _, _ = seeded["b"]
         client_a = login(email_a)
         client_b = login(email_b)
 
