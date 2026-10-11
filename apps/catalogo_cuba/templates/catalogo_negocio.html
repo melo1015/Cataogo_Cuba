@@ -297,7 +297,7 @@
     async function syncQueue() {
         if (!navigator.onLine) { setStatus('Sin conexión. El pedido queda guardado en este dispositivo.'); return; }
         let orders;
-        try { orders = (await allQueued()).filter(o => o.slug === slug && o.status !== 'received'); }
+        try { orders = (await allQueued()).filter(o => o.slug === slug && o.status === 'pending'); }
         catch (_) { setStatus('No se pudo abrir la cola local de pedidos.'); return; }
         for (const order of orders) {
             try {
