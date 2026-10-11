@@ -1116,33 +1116,36 @@ def admin_producto_nuevo():
         "stock", "sku", "categoria_id", "imagen_principal",
         "destacado", "tags", "peso", "meta_keywords",
     ]
-    form = Form(db.producto, fields=campos, deletable=False, formstyle=FormStyleBulma)
+    # py4web Form recibe Field objects, no nombres de campo. Al pasar una
+    # lista se desactiva DB I/O y la inserción se realiza explícitamente abajo.
+    form = Form(
+        [getattr(db.producto, nombre) for nombre in campos],
+        form_name="producto_nuevo", dbio=False, deletable=False,
+        formstyle=FormStyleBulma,
+    )
 
     if form.accepted:
-        producto_id = form.vars.get("id")
-        slug = slugify(form.vars.get("nombre", ""))
+        slug_base = slugify(form.vars.get("nombre", "")) or "producto"
+        slug = slug_base
         contador = 1
-        original = slug
         while db((db.producto.negocio_id == negocio.id) & (db.producto.slug == slug)).count() > 0:
-            slug = "%s-%d" % (original, contador)
+            slug = "%s-%d" % (slug_base, contador)
             contador += 1
 
-        imagen = None
-        archivo = request.files.get("imagen_principal")
-        if archivo and archivo.file:
-            archivo.file.seek(0)
-            imagen = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
-
-        db(db.producto.id == producto_id).update(
-            slug=slug, negocio_id=negocio.id, imagen_principal=imagen,
-            fecha_creacion=ahora_cuba(), fecha_actualizacion=ahora_cuba(),
-        )
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen_principal"}
+        valores.update({
+            "slug": slug,
+            "negocio_id": negocio.id,
+            "imagen_principal": form.vars.get("imagen_principal"),
+            "fecha_creacion": ahora_cuba(),
+            "fecha_actualizacion": ahora_cuba(),
+        })
+        db.producto.insert(**valores)
         db.commit()
         redirect(URL("catalogo_cuba", "admin", "productos"))
 
-    return dict(form=form, negocio=negocio, modo="crear",
+    return dict(form=form, negocio=negocio, modo="crear", producto=None,
                 titulo="Nuevo producto")
-
 
 @action("catalogo_cuba/admin/producto/editar/<producto_id:int>", method=["GET", "POST"])
 @action.uses("admin_producto_form.html", *AccionBase)
@@ -1172,45 +1175,27 @@ def admin_producto_editar(producto_id):
         "stock", "sku", "categoria_id", "imagen_principal",
         "destacado", "tags", "peso", "meta_keywords",
     ]
-    form = Form(db.producto, record=producto, fields=campos,
-                deletable=True, formstyle=FormStyleBulma)
+    form = Form(
+        [getattr(db.producto, nombre) for nombre in campos],
+        record=producto, form_name="producto_editar_%s" % producto_id,
+        dbio=False, deletable=False, formstyle=FormStyleBulma,
+    )
 
     if form.accepted:
-        imagen = producto.imagen_principal
-        archivo = request.files.get("imagen_principal")
-        if archivo and archivo.file:
-            archivo.file.seek(0)
-            nueva = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
-            if nueva:
-                imagen = nueva
-
-        slug_base = slugify(form.vars.get("nombre", producto.nombre)) or "producto"
-        slug = slug_base
-        contador = 1
-        while db(
-            (db.producto.negocio_id == negocio.id) &
-            (db.producto.slug == slug) &
-            (db.producto.id != producto_id)
-        ).count() > 0:
-            slug = "%s-%d" % (slug_base, contador)
-            contador += 1
-
-        db(db.producto.id == producto_id).update(
-            slug=slug,
-            negocio_id=negocio.id,
-            imagen_principal=imagen,
-            fecha_actualizacion=ahora_cuba(),
-        )
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen_principal"}
+        valores.update({
+            "imagen_principal": form.vars.get("imagen_principal") or producto.imagen_principal,
+            "fecha_actualizacion": ahora_cuba(),
+        })
+        # La consulta incluye negocio_id para impedir editar productos ajenos.
+        db(
+            (db.producto.id == producto_id) & (db.producto.negocio_id == negocio.id)
+        ).update(**valores)
         db.commit()
         redirect(URL("catalogo_cuba", "admin", "productos"))
 
     return dict(form=form, negocio=negocio, producto=producto,
                 modo="editar", titulo="Editar: %s" % producto.nombre)
-
-
-# ============================================================
-# CRUD CATEGORIAS
-# ============================================================
 
 @action("catalogo_cuba/admin/categorias")
 @action.uses("admin_categorias.html", *AccionBase)
@@ -1254,29 +1239,34 @@ def admin_categoria_nueva():
     if not negocio:
         redirect(URL("catalogo_cuba", "admin"))
 
-    form = Form(db.categoria,
-                fields=["nombre", "descripcion", "imagen", "orden", "activa"],
-                deletable=False, formstyle=FormStyleBulma)
+    campos = ["nombre", "descripcion", "imagen", "orden", "activa"]
+    form = Form(
+        [getattr(db.categoria, nombre) for nombre in campos],
+        form_name="categoria_nueva", dbio=False, deletable=False,
+        formstyle=FormStyleBulma,
+    )
 
     if form.accepted:
-        cat_id = form.vars.get("id")
         slug_base = slugify(form.vars.get("nombre", "")) or "categoria"
         slug = slug_base
         contador = 1
         while db((db.categoria.negocio_id == negocio.id) & (db.categoria.slug == slug)).count() > 0:
             slug = "%s-%d" % (slug_base, contador)
             contador += 1
-        db(db.categoria.id == cat_id).update(
-            slug=slug,
-            negocio_id=negocio.id,
-            fecha_creacion=ahora_cuba(),
-        )
+
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen"}
+        valores.update({
+            "imagen": form.vars.get("imagen"),
+            "slug": slug,
+            "negocio_id": negocio.id,
+            "fecha_creacion": ahora_cuba(),
+        })
+        db.categoria.insert(**valores)
         db.commit()
         redirect(URL("catalogo_cuba", "admin", "categorias"))
 
-    return dict(form=form, negocio=negocio, modo="crear",
+    return dict(form=form, negocio=negocio, categoria=None, modo="crear",
                 titulo="Nueva categoria")
-
 
 @action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
 @action.uses("admin_categoria_form.html", *AccionBase)
@@ -1323,6 +1313,57 @@ def admin_categoria_editar(categoria_id):
 # ============================================================
 # INVENTARIO
 # ============================================================
+
+@action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
+@action.uses("admin_categoria_form.html", *AccionBase)
+def admin_categoria_editar(categoria_id):
+    _rechazar_uploads_excesivos(["imagen"])
+    user = auth.get_user()
+    if not user or not es_comerciante(user):
+        raise HTTP(403)
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        raise HTTP(403)
+
+    categoria = db(
+        (db.categoria.id == categoria_id) & (db.categoria.negocio_id == negocio.id)
+    ).select().first()
+    if not categoria:
+        raise HTTP(404)
+
+    campos = ["nombre", "descripcion", "imagen", "orden", "activa"]
+    form = Form(
+        [getattr(db.categoria, nombre) for nombre in campos],
+        record=categoria, form_name="categoria_editar_%s" % categoria_id,
+        dbio=False, deletable=False, formstyle=FormStyleBulma,
+    )
+
+    if form.accepted:
+        slug_base = slugify(form.vars.get("nombre", categoria.nombre)) or "categoria"
+        slug = slug_base
+        contador = 1
+        while db(
+            (db.categoria.negocio_id == negocio.id) &
+            (db.categoria.slug == slug) &
+            (db.categoria.id != categoria_id)
+        ).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
+
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen"}
+        valores.update({
+            "imagen": form.vars.get("imagen") or categoria.imagen,
+            "slug": slug,
+        })
+        db(
+            (db.categoria.id == categoria_id) & (db.categoria.negocio_id == negocio.id)
+        ).update(**valores)
+        db.commit()
+        redirect(URL("catalogo_cuba", "admin", "categorias"))
+
+    return dict(form=form, negocio=negocio, categoria=categoria, modo="editar",
+                titulo="Editar: %s" % categoria.nombre)
 
 @action("catalogo_cuba/admin/inventario")
 @action.uses("admin_inventario.html", *AccionBase)
