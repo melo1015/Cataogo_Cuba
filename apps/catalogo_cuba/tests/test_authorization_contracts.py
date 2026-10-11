@@ -46,6 +46,14 @@ class AuthorizationContractTests(unittest.TestCase):
         self.assertIn("settings.COSTO_SUSCRIPCION_MENSUAL_USDT", body)
         self.assertIn("referencia_unica", body)
 
+    def test_subscription_rejects_multiple_open_payments_and_bounds_admin_notes(self):
+        body = controller_function(self.source, "admin_realizar_pago")
+        self.assertIn("pago_abierto", body)
+        self.assertIn('db.pago.estado.belongs(["pendiente", "en_proceso"])', body)
+        self.assertIn('codigo=409', body)
+        validation = controller_function(self.source, "superadmin_validar_pago")
+        self.assertIn("len(notas) > 2000", validation)
+
     def test_payment_validation_requires_superadmin_and_compare_and_set(self):
         body = controller_function(self.source, "superadmin_validar_pago")
         self.assertIn("not es_superadmin()", body)
