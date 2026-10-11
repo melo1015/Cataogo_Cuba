@@ -163,8 +163,12 @@ class ContextoBaseFixture(Fixture):
         self.__prerequisites__ = [session, db]
 
     def on_request(self, context):
-        # Template inyecta este diccionario antes de renderizar la vista.
-        context["template_inject"].update(contexto_base())
+        # Las vistas con sesión autenticada pueden contener navegación/acciones
+        # personalizadas; el navegador y el Service Worker no deben almacenarlas.
+        datos = contexto_base()
+        if datos.get("user"):
+            response.headers["Cache-Control"] = "private, no-store"
+        context["template_inject"].update(datos)
 
 
 AccionBase = (db, ContextoBaseFixture())
