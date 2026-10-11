@@ -24,23 +24,23 @@
             [[for cat in categorias:]]
             <div class="card">
                 <div class="flex-between" style="margin-bottom:.5rem">
-                    <h3 style="font-size:1rem">[[=cat.nombre]]</h3>
+                    <h3 style="font-size:1rem">[[=cat['nombre']]]</h3>
                     <div class="flex" style="gap:.3rem">
-                        <a href="[[=URL('catalogo_cuba', 'admin', 'categoria', 'editar', cat.id)]]" class="btn btn-secondary btn-sm">✏️</a>
+                        <a href="[[=URL('catalogo_cuba', 'admin', 'categoria', 'editar', cat['id'])]]" class="btn btn-secondary btn-sm">✏️</a>
                     </div>
                 </div>
-                [[if cat.descripcion:]]
-                <p class="text-sm">[[=cat.descripcion]]</p>
+                [[if cat.get('descripcion'):]]
+                <p class="text-sm">[[=cat.get('descripcion')]]</p>
                 [[pass]]
                 <div class="flex-between mt-2">
-                    <span class="text-sm">Orden: [[=cat.orden or 0]]</span>
-                    [[if cat.activa:]]
+                    <span class="text-sm">Orden: [[=cat.get('orden') or 0]]</span>
+                    [[if cat.get('activa'):]]
                     <span class="badge badge-green">Activa</span>
                     [[else:]]
                     <span class="badge badge-red">Inactiva</span>
                     [[pass]]
                 </div>
-                <p class="text-sm mt-1">[[=cat.cantidad_productos]] producto(s)</p>
+                <p class="text-sm mt-1">[[=cat.get('cantidad_productos', 0)]] producto(s)</p>
             </div>
             [[pass]]
         </div>
