@@ -50,9 +50,12 @@ class AuthorizationContractTests(unittest.TestCase):
         body = controller_function(self.source, "admin_realizar_pago")
         self.assertIn("pago_abierto", body)
         self.assertIn('db.pago.estado.belongs(["pendiente", "en_proceso"])', body)
+        self.assertIn("suscripcion_abierta_id=suscripcion_id", body)
+        self.assertIn('db.pago.suscripcion_abierta_id == suscripcion_id', body)
         self.assertIn('codigo=409', body)
         validation = controller_function(self.source, "superadmin_validar_pago")
         self.assertIn("len(notas) > 2000", validation)
+        self.assertIn('None if estado in ("validado", "rechazado") else pago.suscripcion_id', validation)
 
     def test_payment_validation_requires_superadmin_and_compare_and_set(self):
         body = controller_function(self.source, "superadmin_validar_pago")
