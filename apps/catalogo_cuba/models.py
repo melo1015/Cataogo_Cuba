@@ -207,6 +207,10 @@ db.define_table(
     # incluso cuando dos solicitudes concurrentes superan la comprobacion previa.
     Field("referencia_unica", "string", length=120, unique=True, default=None,
           label="Clave interna de referencia"),
+    # Clave única para impedir dos pagos abiertos de una misma suscripción,
+    # incluso si dos peticiones concurrentes usan referencias diferentes.
+    Field("suscripcion_abierta_id", "integer", unique=True, default=None,
+          label="Suscripción con pago abierto"),
     Field("comprobante", "upload", uploadfolder=settings.UPLOAD_FOLDER, label="Comprobante de pago",
           requires=IS_EMPTY_OR(IS_IMAGE(maxsize=(2000, 2000)))),
     Field("fecha_solicitud", "datetime", default=None, label="Fecha de solicitud"),
