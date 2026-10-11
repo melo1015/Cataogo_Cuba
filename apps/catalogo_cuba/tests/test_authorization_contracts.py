@@ -197,7 +197,8 @@ class AuthorizationContractTests(unittest.TestCase):
             with self.subTest(endpoint=name):
                 body = controller_function(self.source, name)
                 self.assertIn("archivo.file.seek(0)", body)
-                self.assertIn("guardar_imagen(archivo.file", body)
+                self.assertIn("_optimizar_upload_guardado(", body)
+                self.assertIn("form.vars.get(\"imagen_principal\")", body)
 
 if __name__ == "__main__":
     unittest.main()
