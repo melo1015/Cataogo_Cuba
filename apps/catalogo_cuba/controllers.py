@@ -2232,6 +2232,16 @@ def superadmin_validar_pago(pago_id):
         db.commit()
     except Exception:
         db.rollback()
+        # Si otra validación abrió un pago para la misma suscripción mientras
+        # se procesaba este cambio, devolver conflicto en vez de error interno.
+        if estado not in ("validado", "rechazado") and db(
+            db.pago.suscripcion_abierta_id == pago.suscripcion_id
+        ).count() > 0:
+            return respuesta_json(
+                exito=False,
+                mensaje="Ya existe otro pago abierto para esta suscripción.",
+                codigo=409,
+            )
         return respuesta_json(
             exito=False,
             mensaje="No se pudo procesar la validacion del pago. Intenta nuevamente.",
