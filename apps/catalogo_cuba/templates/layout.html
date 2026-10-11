@@ -134,7 +134,7 @@
             <!-- Navegacion -->
             <nav class="nav-links">
                 <a href="[[=URL('catalogo_cuba')]]">Inicio</a>
-                [[if globals().get('user'):]
+                [[if globals().get('user'):]]
                     [[if globals().get('rol') == 'superadmin':]]
                         <a href="[[=URL('catalogo_cuba', 'superadmin')]]">Admin</a>
                     [[else:]]
