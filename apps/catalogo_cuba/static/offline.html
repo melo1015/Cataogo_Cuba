@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2563eb">
+  <title>Sin conexión · CatalogoCuba</title>
+  <style>
+    :root{color-scheme:light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f8fafc}
+    body{min-height:100vh;margin:0;display:grid;place-items:center;padding:1.25rem;box-sizing:border-box}
+    main{max-width:34rem;background:#fff;border:1px solid #e2e8f0;border-radius:1rem;padding:2rem;box-shadow:0 8px 30px #0f172a0d}
+    h1{font-size:1.5rem;margin:.5rem 0 1rem}p{line-height:1.6;color:#475569}
+    a,button{display:inline-block;border:0;border-radius:.6rem;background:#2563eb;color:#fff;padding:.75rem 1rem;font:inherit;text-decoration:none;cursor:pointer}
+    .hint{font-size:.9rem}
+  </style>
+</head>
+<body>
+  <main>
+    <div aria-hidden="true" style="font-size:2rem">📡</div>
+    <h1>No hay conexión a Internet</h1>
+    <p>CatalogoCuba está sin conexión. Puedes volver a una página del catálogo que hayas visitado antes para consultar la copia guardada en este dispositivo.</p>
+    <p class="hint">Los pedidos guardados localmente permanecen en este dispositivo y se podrán enviar cuando vuelva la conexión. No cierres ni borres los datos del navegador si necesitas conservarlos.</p>
+    <button type="button" onclick="history.back()">Volver a la página anterior</button>
+    <p><a href="/catalogo_cuba/">Ir al inicio</a></p>
+  </main>
+</body>
+</html>
