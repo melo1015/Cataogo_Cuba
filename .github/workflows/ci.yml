@@ -164,9 +164,12 @@ jobs:
                   login_status = exc.code
                   login_body = exc.read().decode("utf-8", errors="replace")
               if login_status != 200:
-                  raise AssertionError(
-                      "py4web auth login page should return HTTP 200, got HTTP %s: %s"
-                      % (login_status, login_body[-1000:])
+                  server.terminate()
+                  output, _ = server.communicate(timeout=10)
+                  raise RuntimeError(
+                      "py4web auth login page should return HTTP 200, got HTTP %s: %s. "
+                      "Server output: %s"
+                      % (login_status, login_body[-1000:], output[-12000:])
                   )
 
               protected_routes = [
