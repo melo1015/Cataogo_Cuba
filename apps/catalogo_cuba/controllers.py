@@ -1613,6 +1613,20 @@ def admin_realizar_pago():
         db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])
     ).select(orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)).first()
 
+    # Una suscripción no debe acumular varios pagos abiertos: validar dos pagos
+    # distintos de la misma renovación ampliaría el plazo varias veces.
+    if suscripcion:
+        pago_abierto = db(
+            (db.pago.suscripcion_id == suscripcion.id) &
+            db.pago.estado.belongs(["pendiente", "en_proceso"])
+        ).select().first()
+        if pago_abierto:
+            return respuesta_json(
+                exito=False,
+                mensaje="Ya existe un pago pendiente de revisión para esta suscripción.",
+                codigo=409,
+            )
+
     ahora = ahora_cuba()
     try:
         if not suscripcion:
@@ -2126,6 +2140,9 @@ def superadmin_validar_pago(pago_id):
     estado = request.forms.get("estado", "validado")
     notas = request.forms.get("notas", "")
     user = auth.get_user()
+
+    if not isinstance(notas, str) or len(notas) > 2000:
+        return respuesta_json(exito=False, mensaje="Las notas no pueden superar 2000 caracteres", codigo=400)
 
     if estado not in ("validado", "rechazado", "en_proceso", "pendiente"):
         return respuesta_json(exito=False, mensaje="Estado de pago no valido", codigo=400)
