@@ -1645,6 +1645,7 @@ def admin_realizar_pago():
             usuario_id=user["id"], monto=str(monto_esperado), moneda=moneda,
             metodo_pago=metodo, estado="pendiente", referencia=referencia,
             referencia_unica=referencia_unica,
+            suscripcion_abierta_id=suscripcion_id,
             fecha_solicitud=ahora,
         )
         if suscripcion:
@@ -1661,6 +1662,12 @@ def admin_realizar_pago():
             return respuesta_json(
                 exito=False,
                 mensaje="Esta referencia ya esta registrada",
+                codigo=409,
+            )
+        if db(db.pago.suscripcion_abierta_id == suscripcion_id).count() > 0:
+            return respuesta_json(
+                exito=False,
+                mensaje="Ya existe un pago pendiente de revisión para esta suscripción.",
                 codigo=409,
             )
         return respuesta_json(
@@ -2170,6 +2177,9 @@ def superadmin_validar_pago(pago_id):
             (db.pago.id == pago_id) & (db.pago.estado == pago.estado)
         ).update(
             estado=estado,
+            suscripcion_abierta_id=(
+                None if estado in ("validado", "rechazado") else pago.suscripcion_id
+            ),
             fecha_validacion=ahora,
             validado_por=user["id"] if user else None,
             notas_validacion=notas,
