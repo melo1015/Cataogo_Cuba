@@ -2,7 +2,7 @@
     "name": "CatalogoCuba",
     "short_name": "CatalogoCuba",
     "description": "Directorio de negocios cubanos. Funciona sin conexion.",
-    "start_url": "/catalogo_cuba/",
+    "start_url": "/catalogo_cuba/catalogo_cuba",
     "scope": "/catalogo_cuba/",
     "display": "standalone",
     "orientation": "portrait-primary",
