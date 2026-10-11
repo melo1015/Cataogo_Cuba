@@ -71,6 +71,7 @@ def seed():
         result = auth.register(
             {
                 "email": email,
+                "username": email.split("@")[0],
                 "password": "TestPassword123!",
                 "first_name": first_name,
                 "last_name": "Integration",
