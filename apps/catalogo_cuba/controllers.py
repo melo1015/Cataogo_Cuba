@@ -688,6 +688,19 @@ def api_producto_detalle(slug, producto_slug):
 @action.uses(db)
 def api_crear_pedido(slug):
     """Registra una solicitud de pedido; no confirma ni descuenta inventario."""
+    # Limitar el cuerpo antes de parsear JSON para reducir abuso de memoria/CPU.
+    # El proxy de producción también debe imponer un límite equivalente.
+    longitud_raw = request.environ.get("CONTENT_LENGTH", "")
+    if longitud_raw:
+        try:
+            longitud = int(longitud_raw)
+        except (TypeError, ValueError):
+            return respuesta_json(exito=False, mensaje="Longitud de solicitud invalida", codigo=400)
+        if longitud < 0:
+            return respuesta_json(exito=False, mensaje="Longitud de solicitud invalida", codigo=400)
+        if longitud > settings.MAX_ORDER_REQUEST_SIZE:
+            return respuesta_json(exito=False, mensaje="La solicitud supera el tamaño permitido", codigo=413)
+
     data = request.json
     if not isinstance(data, dict):
         return respuesta_json(exito=False, mensaje="Se esperaba un objeto JSON", codigo=400)
