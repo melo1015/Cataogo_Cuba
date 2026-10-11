@@ -156,10 +156,22 @@ class AuthorizationContractTests(unittest.TestCase):
             "superadmin_guardar_configuracion",
             "api_marcar_leida",
         ]
+        crud_form_posts = [
+            "admin_negocio_nuevo",
+            "admin_negocio_editar",
+            "admin_producto_nuevo",
+            "admin_producto_editar",
+            "admin_categoria_nueva",
+            "admin_categoria_editar",
+        ]
         for name in protected:
             with self.subTest(endpoint=name):
                 body = controller_function(self.source, name)
                 self.assertIn("_peticion_mismo_origen()", body)
+        for name in crud_form_posts:
+            with self.subTest(endpoint=name):
+                body = controller_function(self.source, name)
+                self.assertIn("_exigir_mismo_origen_en_post()", body)
 
     def test_upload_routes_reject_oversized_files_before_form_processing(self):
         for name, field in [
