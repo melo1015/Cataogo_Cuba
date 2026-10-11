@@ -68,6 +68,22 @@ def _rechazar_uploads_excesivos(nombres_campos):
             raise HTTP(413, "La imagen supera el limite permitido de 2 MiB")
 
 
+def _optimizar_upload_guardado(nombre_archivo, carpeta, anterior=None):
+    """Optimiza el archivo temporal almacenado por el widget upload de py4web."""
+    if not nombre_archivo:
+        return anterior
+    raiz = os.path.realpath(settings.UPLOAD_FOLDER)
+    ruta = os.path.realpath(os.path.join(raiz, nombre_archivo))
+    try:
+        if os.path.commonpath([raiz, ruta]) != raiz or not os.path.isfile(ruta):
+            return anterior
+        with open(ruta, "rb") as archivo:
+            optimizada = guardar_imagen(archivo, carpeta)
+        return optimizada or anterior
+    except (OSError, ValueError):
+        return anterior
+
+
 def _tiene_rol(user_id, rol):
     """Verifica si un usuario tiene un rol (tag) determinado."""
     if not user_id:
@@ -1116,6 +1132,9 @@ def admin_producto_nuevo():
         "stock", "sku", "categoria_id", "imagen_principal",
         "destacado", "tags", "peso", "meta_keywords",
     ]
+    archivo = request.files.get("imagen_principal")
+    if archivo and archivo.file:
+        archivo.file.seek(0)
     # py4web Form recibe Field objects, no nombres de campo. Al pasar una
     # lista se desactiva DB I/O y la inserción se realiza explícitamente abajo.
     form = Form(
@@ -1133,10 +1152,13 @@ def admin_producto_nuevo():
             contador += 1
 
         valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen_principal"}
+        imagen = form.vars.get("imagen_principal")
+        if archivo and archivo.file and imagen:
+            imagen = _optimizar_upload_guardado(imagen, "productos/%s" % negocio.id)
         valores.update({
             "slug": slug,
             "negocio_id": negocio.id,
-            "imagen_principal": form.vars.get("imagen_principal"),
+            "imagen_principal": imagen,
             "fecha_creacion": ahora_cuba(),
             "fecha_actualizacion": ahora_cuba(),
         })
@@ -1175,6 +1197,9 @@ def admin_producto_editar(producto_id):
         "stock", "sku", "categoria_id", "imagen_principal",
         "destacado", "tags", "peso", "meta_keywords",
     ]
+    archivo = request.files.get("imagen_principal")
+    if archivo and archivo.file:
+        archivo.file.seek(0)
     form = Form(
         [getattr(db.producto, nombre) for nombre in campos],
         record=producto, form_name="producto_editar_%s" % producto_id,
@@ -1182,9 +1207,27 @@ def admin_producto_editar(producto_id):
     )
 
     if form.accepted:
+        slug_base = slugify(form.vars.get("nombre", producto.nombre)) or "producto"
+        slug = slug_base
+        contador = 1
+        while db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.slug == slug) &
+            (db.producto.id != producto_id)
+        ).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
+
         valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen_principal"}
+        imagen = producto.imagen_principal
+        imagen_subida = form.vars.get("imagen_principal")
+        if archivo and archivo.file and imagen_subida:
+            imagen = _optimizar_upload_guardado(
+                imagen_subida, "productos/%s" % negocio.id, anterior=producto.imagen_principal
+            )
         valores.update({
-            "imagen_principal": form.vars.get("imagen_principal") or producto.imagen_principal,
+            "slug": slug,
+            "imagen_principal": imagen,
             "fecha_actualizacion": ahora_cuba(),
         })
         # La consulta incluye negocio_id para impedir editar productos ajenos.
