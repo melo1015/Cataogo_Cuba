@@ -50,6 +50,16 @@ def _peticion_mismo_origen():
         return False
 
 
+def _exigir_mismo_origen_en_post():
+    """Rechaza POST de formularios autenticados si no provienen del mismo origen.
+
+    Es una defensa adicional frente a CSRF basada en cookies. No sustituye
+    el token CSRF que pueda proporcionar el formulario/framework.
+    """
+    if request.method == "POST" and not _peticion_mismo_origen():
+        raise HTTP(403, "Origen de solicitud no permitido")
+
+
 def _rechazar_uploads_excesivos(nombres_campos):
     """Corta antes de construir Form si un upload supera el limite de bytes."""
     for nombre in nombres_campos:
@@ -957,6 +967,7 @@ def admin_dashboard():
 @action("catalogo_cuba/admin/negocio/nuevo", method=["GET", "POST"])
 @action.uses("admin_negocio_form.html", *AccionBase)
 def admin_negocio_nuevo():
+    _exigir_mismo_origen_en_post()
     user = auth.get_user()
     if not user:
         redirect(URL("auth", "login"))
@@ -1017,6 +1028,7 @@ def admin_negocio_nuevo():
 @action("catalogo_cuba/admin/negocio/editar", method=["GET", "POST"])
 @action.uses("admin_negocio_form.html", *AccionBase)
 def admin_negocio_editar():
+    _exigir_mismo_origen_en_post()
     _rechazar_uploads_excesivos(["logo"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1113,6 +1125,7 @@ def admin_productos():
 @action("catalogo_cuba/admin/producto/nuevo", method=["GET", "POST"])
 @action.uses("admin_producto_form.html", *AccionBase)
 def admin_producto_nuevo():
+    _exigir_mismo_origen_en_post()
     _rechazar_uploads_excesivos(["imagen_principal"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1172,6 +1185,7 @@ def admin_producto_nuevo():
 @action("catalogo_cuba/admin/producto/editar/<producto_id:int>", method=["GET", "POST"])
 @action.uses("admin_producto_form.html", *AccionBase)
 def admin_producto_editar(producto_id):
+    _exigir_mismo_origen_en_post()
     _rechazar_uploads_excesivos(["imagen_principal"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1273,6 +1287,7 @@ def admin_categorias():
 @action("catalogo_cuba/admin/categoria/nueva", method=["GET", "POST"])
 @action.uses("admin_categoria_form.html", *AccionBase)
 def admin_categoria_nueva():
+    _exigir_mismo_origen_en_post()
     _rechazar_uploads_excesivos(["imagen"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1314,6 +1329,7 @@ def admin_categoria_nueva():
 @action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
 @action.uses("admin_categoria_form.html", *AccionBase)
 def admin_categoria_editar(categoria_id):
+    _exigir_mismo_origen_en_post()
     _rechazar_uploads_excesivos(["imagen"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
