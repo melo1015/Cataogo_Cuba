@@ -85,6 +85,13 @@ jobs:
           CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_ci.db"
           PYTHONPATH: apps
         run: python -m unittest discover -s apps/catalogo_cuba/tests -v
+      - name: Test authenticated merchant CRUD over HTTP
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          CATALOGO_CUBA_SECRET: "ci-only-crud-http-secret"
+          CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_crud_http_ci.db"
+          PYTHONPATH: apps
+        run: python apps/catalogo_cuba/tests/crud_http_integration.py
       - name: Smoke-test real HTTP routes and unauthenticated payment protection
         env:
           CATALOGO_CUBA_DEBUG: "1"
