@@ -221,6 +221,13 @@ def main():
         })
         status, body = post_form(client_a, category_path, category_payload)
         if status not in (200, 302, 303):
+            if status >= 500:
+                server.terminate()
+                output, _ = server.communicate(timeout=10)
+                raise RuntimeError(
+                    "Category create POST failed: HTTP %s %s. Server output: %s"
+                    % (status, body[-1000:], output[-12000:])
+                )
             raise AssertionError("Category create POST failed: HTTP %s %s" % (status, body[-1000:]))
         created_category = db(
             (db.categoria.negocio_id == seeded["a"][2]) &
