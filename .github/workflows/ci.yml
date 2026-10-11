@@ -252,6 +252,24 @@ jobs:
                       % dashboard_status
                   )
 
+              # El endpoint rechaza cuerpos grandes antes de intentar parsear JSON.
+              oversized_order = urllib.request.Request(
+                  base + "/catalogo_cuba/catalogo_cuba/api/negocio/slug-no-importa/pedidos",
+                  data=b"x" * (64 * 1024 + 1),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  oversized_response = client.open(oversized_order, timeout=5)
+                  oversized_status = oversized_response.getcode()
+              except urllib.error.HTTPError as exc:
+                  oversized_status = exc.code
+              if oversized_status != 413:
+                  raise AssertionError(
+                      "Oversized public order body should return HTTP 413, got HTTP %s"
+                      % oversized_status
+                  )
+
               # La ruta pública de pedidos debe responder con un error de validación
               # controlado (400), no con un error interno, ante un UUID inválido.
               invalid_order = urllib.request.Request(
