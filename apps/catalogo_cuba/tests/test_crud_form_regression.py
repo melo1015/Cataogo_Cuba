@@ -63,6 +63,29 @@ class CrudFormRegressionTests(unittest.TestCase):
                 self.assertIn('"slug": slug', source)
                 self.assertNotIn("form.vars.get(\"id\")", source)
 
+    def test_product_category_selector_is_limited_to_current_business(self):
+        for name in ("admin_producto_nuevo", "admin_producto_editar"):
+            with self.subTest(controller=name):
+                source = ast.get_source_segment(self.source, self.functions[name])
+                self.assertIn("db.categoria.negocio_id == negocio.id", source)
+                self.assertIn("IS_IN_DB(db(db.categoria.negocio_id == negocio.id)", source)
+
+    def test_edit_routes_reject_foreign_records_before_building_form(self):
+        cases = (
+            ("admin_producto_editar", "db.producto.negocio_id == negocio.id", "producto"),
+            ("admin_categoria_editar", "db.categoria.negocio_id == negocio.id", "categoria"),
+        )
+        for name, tenant_guard, record_name in cases:
+            with self.subTest(controller=name):
+                source = ast.get_source_segment(self.source, self.functions[name])
+                self.assertIn(tenant_guard, source)
+                self.assertLess(
+                    source.index(tenant_guard),
+                    source.index("form = Form("),
+                    "La pertenencia al negocio debe verificarse antes de procesar el formulario",
+                )
+                self.assertIn("if not %s:" % record_name, source)
+
     def test_edit_routes_scope_update_to_owned_record(self):
         for name, (table, operation) in TARGETS.items():
             if operation != "update":
