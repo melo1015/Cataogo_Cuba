@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="CatalogoCuba - Directorio de negocios cubanos">
-    <title>[[=titulo or 'CatalogoCuba']]</title>
+    <title>[[=globals().get('titulo') or 'CatalogoCuba']]</title>
     
     <!-- Preconnect para conexiones lentas -->
     <link rel="preconnect" href="/">
@@ -127,18 +127,18 @@
             <!-- Busqueda -->
             <form class="search-box" action="[[=URL('catalogo_cuba', 'buscar')]]" method="GET">
                 <input type="search" name="q" placeholder="Buscar productos o negocios..." 
-                       value="[[=q_actual or '']]" aria-label="Buscar">
+                       value="[[=globals().get('q_actual') or '']]" aria-label="Buscar">
                 <button type="submit" class="btn btn-primary btn-sm">🔍</button>
             </form>
             
             <!-- Navegacion -->
             <nav class="nav-links">
                 <a href="[[=URL('catalogo_cuba')]]">Inicio</a>
-                [[if user:]]
-                    [[if rol == 'superadmin':]]
+                [[if globals().get('user'):]
+                    [[if globals().get('rol') == 'superadmin':]]
                         <a href="[[=URL('catalogo_cuba', 'superadmin')]]">Admin</a>
                     [[else:]]
-                        [[if rol == 'comerciante':]]
+                        [[if globals().get('rol') == 'comerciante':]]
                         <a href="[[=URL('catalogo_cuba', 'admin')]]">Mi Negocio</a>
                         [[pass]]
                     [[pass]]
