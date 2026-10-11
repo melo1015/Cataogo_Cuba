@@ -270,6 +270,13 @@ def main():
         product_payload["sku"] = "HTTP-OWN-CATEGORY"
         status, body = post_form(client_a, product_path, product_payload)
         if status not in (200, 302, 303):
+            if status >= 500:
+                server.terminate()
+                output, _ = server.communicate(timeout=10)
+                raise RuntimeError(
+                    "Product create POST failed: HTTP %s %s. Server output: %s"
+                    % (status, body[-1000:], output[-12000:])
+                )
             raise AssertionError("Product create POST failed: HTTP %s %s" % (status, body[-1000:]))
         created_product = db(
             (db.producto.negocio_id == seeded["a"][2]) &
