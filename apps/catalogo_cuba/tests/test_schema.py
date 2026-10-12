@@ -30,6 +30,25 @@ class SchemaSmokeTests(unittest.TestCase):
         fields = set(db.producto.fields)
         self.assertTrue({"negocio_id", "precio", "moneda", "stock", "disponible"}.issubset(fields))
 
+    def test_order_schema_has_idempotency_key_and_snapshot_fields(self):
+        self.assertIn("pedido", db.tables)
+        self.assertIn("pedido_item", db.tables)
+        order_fields = set(db.pedido.fields)
+        self.assertTrue({
+            "client_uuid", "negocio_id", "estado", "total", "fecha_creacion"
+        }.issubset(order_fields))
+        item_fields = set(db.pedido_item.fields)
+        self.assertTrue({
+            "pedido_id", "producto_id", "cantidad", "precio_unitario", "subtotal"
+        }.issubset(item_fields))
+        self.assertTrue(db.pedido.client_uuid.unique)
+        self.assertTrue(db.pedido.client_uuid.notnull)
+
+    def test_payment_has_open_subscription_uniqueness_guard(self):
+        self.assertIn("suscripcion_abierta_id", db.pago.fields)
+        self.assertTrue(db.pago.suscripcion_abierta_id.unique)
+        self.assertFalse(db.pago.suscripcion_abierta_id.notnull)
+
     def test_payment_has_review_state_and_audit_fields(self):
         fields = set(db.pago.fields)
         self.assertTrue(
