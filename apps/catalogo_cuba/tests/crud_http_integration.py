@@ -1,0 +1,569 @@
+"""HTTP integration test for authenticated, multi-tenant CRUD routes.
+
+Run from the repository root with PYTHONPATH=apps and a dedicated SQLite URI.
+The test seeds two merchants, logs in through py4web's real HTTP API, and
+checks create/edit access plus cross-tenant isolation over HTTP.
+"""
+import os
+import json
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.cookiejar import CookieJar
+from html.parser import HTMLParser
+
+os.environ.setdefault("CATALOGO_CUBA_DEBUG", "1")
+os.environ.setdefault("CATALOGO_CUBA_SECRET", "ci-only-crud-http-secret")
+os.environ.setdefault("CATALOGO_CUBA_DB_URI", "sqlite://catalogo_cuba_crud_http.db")
+sys.path.insert(0, os.path.abspath("apps"))
+
+from catalogo_cuba import models  # noqa: E402,F401
+from catalogo_cuba.common import auth, db, asignar_rol  # noqa: E402
+
+BASE = "http://127.0.0.1:8766"
+APP_PREFIX = "/catalogo_cuba"
+CRUD_PREFIX = APP_PREFIX + "/catalogo_cuba/admin"
+
+
+class HiddenInputs(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.values = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "input":
+            return
+        item = dict(attrs)
+        if item.get("type", "").lower() == "hidden" and item.get("name"):
+            self.values[item["name"]] = item.get("value", "")
+
+
+def request(opener, path, data=None, headers=None, method=None):
+    req = urllib.request.Request(
+        BASE + path,
+        data=data,
+        headers=headers or {},
+        method=method or ("POST" if data is not None else "GET"),
+    )
+    try:
+        response = opener.open(req, timeout=8)
+        return response.getcode(), response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", errors="replace")
+
+
+def seed():
+    # The integration database is dedicated to this test; reset only its test data.
+    auth.param.registration_requires_confirmation = False
+    auth.param.registration_requires_approval = False
+    auth.param.login_after_registration = False
+    email_a = "crud-merchant-a@example.test"
+    email_b = "crud-merchant-b@example.test"
+    for email in (email_a, email_b):
+        old = db(db.auth_user.email == email).select().first()
+        if old:
+            db(db.auth_user.id == old.id).delete()
+    db.commit()
+
+    def create_user(email, first_name):
+        result = auth.register(
+            {
+                "email": email,
+                "username": email.split("@")[0],
+                "password": "TestPassword123!",
+                "first_name": first_name,
+                "last_name": "Integration",
+            },
+            send=False,
+            validate=True,
+        )
+        if result.get("errors") or not result.get("id"):
+            raise AssertionError("Could not seed test user %s: %r" % (email, result))
+        user_id = result["id"]
+        asignar_rol(user_id, "comerciante")
+        return user_id
+
+    user_a = create_user(email_a, "MerchantA")
+    user_b = create_user(email_b, "MerchantB")
+    business_a = db.negocio.insert(
+        nombre="Negocio HTTP A", slug="negocio-http-a", usuario_id=user_a,
+        activo=True, aprobado=True, moneda_principal="CUP",
+    )
+    business_b = db.negocio.insert(
+        nombre="Negocio HTTP B", slug="negocio-http-b", usuario_id=user_b,
+        activo=True, aprobado=True, moneda_principal="CUP",
+    )
+    from datetime import date
+    today = date.today()
+    db.suscripcion.insert(
+        negocio_id=business_a, usuario_id=user_a,
+        fecha_inicio=today, fecha_fin=today + __import__("datetime").timedelta(days=30),
+        estado="activa",
+    )
+    db.suscripcion.insert(
+        negocio_id=business_b, usuario_id=user_b,
+        fecha_inicio=today, fecha_fin=today + __import__("datetime").timedelta(days=30),
+        estado="activa",
+    )
+    category_a = db.categoria.insert(
+        nombre="Categoria A", slug="categoria-a", negocio_id=business_a, activa=True,
+    )
+    category_b = db.categoria.insert(
+        nombre="Categoria B", slug="categoria-b", negocio_id=business_b, activa=True,
+    )
+    product_a = db.producto.insert(
+        nombre="Producto A", slug="producto-a", negocio_id=business_a,
+        categoria_id=category_a, precio=10, moneda="CUP", disponible=True, stock=3,
+    )
+    product_b = db.producto.insert(
+        nombre="Producto B", slug="producto-b", negocio_id=business_b,
+        categoria_id=category_b, precio=20, moneda="CUP", disponible=True, stock=4,
+    )
+    order_b = db.pedido.insert(
+        client_uuid="11111111-1111-4111-8111-111111111111",
+        negocio_id=business_b, cliente_nombre="Cliente de prueba",
+        cliente_telefono="5550101", direccion_entrega="", notas="",
+        estado="pendiente_revision", moneda="CUP", total=20,
+    )
+    db.pedido_item.insert(
+        pedido_id=order_b, producto_id=product_b, nombre_producto="Producto B",
+        cantidad=1, precio_unitario=20, subtotal=20,
+    )
+    notification_b = db.notificacion.insert(
+        usuario_id=user_b, tipo="general", titulo="Prueba de aislamiento",
+        mensaje="No debe poder marcarla otro comerciante", leida=False,
+    )
+    db.commit()
+    return {
+        "a": (email_a, user_a, business_a, category_a, product_a),
+        "b": (email_b, user_b, business_b, category_b, product_b, order_b, notification_b),
+    }
+
+
+def login(email):
+    jar = CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    payload = urllib.parse.urlencode(
+        {"email": email, "password": "TestPassword123!"}
+    ).encode()
+    status, body = request(
+        opener,
+        APP_PREFIX + "/auth/api/login",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    if status not in (200, 201) or not list(jar):
+        raise AssertionError("HTTP login failed for %s: status=%s body=%s" % (email, status, body[-1000:]))
+    return opener
+
+
+def form_payload(opener, path, values):
+    status, body = request(opener, path)
+    if status != 200:
+        raise AssertionError("Expected CRUD form HTTP 200 at %s, got %s" % (path, status))
+    parser = HiddenInputs()
+    parser.feed(body)
+    payload = dict(parser.values)
+    payload.update(values)
+    return payload
+
+
+def post_form(opener, path, payload):
+    data = urllib.parse.urlencode(payload, doseq=True).encode()
+    return request(
+        opener,
+        path,
+        data=data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": BASE,
+            "Referer": BASE + path,
+        },
+    )
+
+
+def main():
+    seeded = seed()
+    server_env = os.environ.copy()
+    server = subprocess.Popen(
+        [
+            "py4web", "run", "--yes", "--host", "127.0.0.1", "--port", "8766",
+            "--app_names", "catalogo_cuba", "--server", "wsgiref",
+            "--quiet", "--watch", "off", "apps",
+        ],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=server_env,
+    )
+    try:
+        last_error = None
+        for _ in range(50):
+            if server.poll() is not None:
+                output = server.stdout.read().decode("utf-8", errors="replace")
+                raise RuntimeError("py4web exited before readiness: " + output[-8000:])
+            try:
+                status, _ = request(urllib.request.build_opener(), APP_PREFIX + "/auth/login")
+                if status == 200:
+                    break
+                last_error = "login page HTTP %s" % status
+            except Exception as exc:
+                last_error = repr(exc)
+            time.sleep(0.4)
+        else:
+            raise RuntimeError("py4web did not become ready: %r" % last_error)
+
+        email_a, _, _, category_a, product_a = seeded["a"]
+        email_b, _, _, category_b, product_b, _, _ = seeded["b"]
+        client_a = login(email_a)
+        client_b = login(email_b)
+
+        # La API pública debe ser idempotente al reintentar un pedido offline:
+        # mismo UUID = mismo pedido; mismo UUID en otro negocio = conflicto.
+        public_order_payload = {
+            "client_uuid": "22222222-2222-4222-8222-222222222222",
+            "cliente_nombre": "Cliente idempotencia",
+            "cliente_telefono": "5550102",
+            "direccion_entrega": "",
+            "notas": "Prueba de reintento",
+            "items": [{"producto_id": seeded["a"][4], "cantidad": 1}],
+        }
+        public_order_data = json.dumps(public_order_payload).encode()
+        order_headers = {"Content-Type": "application/json"}
+        status, body = request(
+            urllib.request.build_opener(),
+            APP_PREFIX + "/catalogo_cuba/api/negocio/negocio-http-a/pedidos",
+            data=public_order_data, headers=order_headers,
+        )
+        if status != 200:
+            raise AssertionError("First public order request failed: HTTP %s %s" % (status, body[-500:]))
+        first_order_response = json.loads(body)
+        first_order_id = first_order_response.get("datos", {}).get("pedido_id")
+        if not first_order_id or first_order_response.get("datos", {}).get("duplicado") is not False:
+            raise AssertionError("First order response did not report a newly created order: %s" % body[-500:])
+        status, body = request(
+            urllib.request.build_opener(),
+            APP_PREFIX + "/catalogo_cuba/api/negocio/negocio-http-a/pedidos",
+            data=public_order_data, headers=order_headers,
+        )
+        if status != 200:
+            raise AssertionError("Idempotent retry failed: HTTP %s %s" % (status, body[-500:]))
+        retry_response = json.loads(body)
+        if (retry_response.get("datos", {}).get("pedido_id") != first_order_id or
+                retry_response.get("datos", {}).get("duplicado") is not True):
+            raise AssertionError("Retry created a different order or was not marked duplicate: %s" % body[-500:])
+        if db(db.pedido.client_uuid == public_order_payload["client_uuid"]).count() != 1:
+            raise AssertionError("Idempotent retry created duplicate database rows")
+        status, body = request(
+            urllib.request.build_opener(),
+            APP_PREFIX + "/catalogo_cuba/api/negocio/negocio-http-b/pedidos",
+            data=public_order_data, headers=order_headers,
+        )
+        if status != 409:
+            raise AssertionError("UUID reuse by another business should return 409, got HTTP %s: %s" % (status, body[-500:]))
+
+        # Cross-tenant mutation attempts must not modify inventory, orders or notifications.
+        business_b_id = seeded["b"][2]
+        product_b_id = seeded["b"][4]
+        order_b_id = seeded["b"][5]
+        notification_b_id = seeded["b"][6]
+        stock_before = db(db.producto.id == product_b_id).select().first().stock
+        status, body = request(
+            client_a,
+            APP_PREFIX + "/catalogo_cuba/api/inventario/actualizar",
+            data=__import__("json").dumps({"producto_id": product_b_id, "stock": 999}).encode(),
+            headers={"Content-Type": "application/json", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin/inventario"},
+        )
+        if status != 404:
+            raise AssertionError("Cross-tenant inventory update should return 404, got HTTP %s: %s" % (status, body[-500:]))
+        stock_after = db(db.producto.id == product_b_id).select().first().stock
+        if stock_after != stock_before:
+            raise AssertionError("Merchant A changed Merchant B inventory")
+
+        status, body = request(
+            client_a,
+            APP_PREFIX + "/catalogo_cuba/admin/pedidos/%s/estado" % order_b_id,
+            data=b'{"estado":"aceptado"}',
+            headers={"Content-Type": "application/json", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin"},
+        )
+        if status != 404:
+            raise AssertionError("Cross-tenant order mutation should return 404, got HTTP %s: %s" % (status, body[-500:]))
+        order_after = db(db.pedido.id == order_b_id).select().first()
+        stock_after_order = db(db.producto.id == product_b_id).select().first().stock
+        if order_after.estado != "pendiente_revision" or stock_after_order != stock_before:
+            raise AssertionError("Merchant A modified Merchant B order or stock")
+
+        status, body = request(
+            client_a,
+            APP_PREFIX + "/catalogo_cuba/api/notificacion/leer/%s" % notification_b_id,
+            data=b"",
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin"},
+        )
+        if status != 404:
+            raise AssertionError("Cross-tenant notification update should return 404, got HTTP %s: %s" % (status, body[-500:]))
+        notification_after = db(db.notificacion.id == notification_b_id).select().first()
+        if notification_after.leida:
+            raise AssertionError("Merchant A marked Merchant B notification as read")
+
+        # The owning merchant must be able to accept its own order after the
+        # cross-tenant attempts; successful acceptance decrements stock once.
+        status, body = request(
+            client_b,
+            APP_PREFIX + "/catalogo_cuba/admin/pedidos/%s/estado" % order_b_id,
+            data=b'{"estado":"aceptado"}',
+            headers={"Content-Type": "application/json", "Origin": BASE,
+                     "Referer": BASE + "/catalogo_cuba/catalogo_cuba/admin"},
+        )
+        if status != 200:
+            raise AssertionError("Owner should be able to accept own order, got HTTP %s: %s" % (status, body[-500:]))
+        order_after_owner = db(db.pedido.id == order_b_id).select().first()
+        stock_after_owner = db(db.producto.id == product_b_id).select().first().stock
+        if order_after_owner.estado != "aceptado" or stock_after_owner != stock_before - 1:
+            raise AssertionError("Owner acceptance did not update order and decrement stock exactly once")
+
+        # A merchant must not access superadmin functions, and anonymous users
+        # must not access the merchant panel.
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            # Preserve the original 302 so the test does not mistake the
+            # redirected login page's HTTP 200 for public dashboard access.
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        anonymous = urllib.request.build_opener(NoRedirect)
+        status, _ = request(anonymous, CRUD_PREFIX)
+        if status not in (302, 303, 401, 403):
+            raise AssertionError("Anonymous merchant-panel access was not denied: HTTP %s" % status)
+        status, _ = request(client_a, APP_PREFIX + "/catalogo_cuba/superadmin")
+        if status != 403:
+            raise AssertionError("Merchant session must be denied superadmin dashboard, got HTTP %s" % status)
+
+        # Own create/edit pages must be accessible to an authenticated merchant.
+        for path in (
+            CRUD_PREFIX + "/producto/nuevo",
+            CRUD_PREFIX + "/categoria/nueva",
+            CRUD_PREFIX + "/producto/editar/%s" % product_a,
+            CRUD_PREFIX + "/categoria/editar/%s" % category_a,
+        ):
+            status, body = request(client_a, path)
+            if status != 200:
+                raise AssertionError("Merchant A cannot access own CRUD form %s: HTTP %s %s" % (path, status, body[-500:]))
+
+        # Foreign resources must be hidden even if their numeric IDs are known.
+        for path in (
+            CRUD_PREFIX + "/producto/editar/%s" % product_b,
+            CRUD_PREFIX + "/categoria/editar/%s" % category_b,
+        ):
+            status, _ = request(client_a, path)
+            if status != 404:
+                raise AssertionError("Cross-tenant edit should return 404 for %s, got %s" % (path, status))
+
+        # Create a category through the actual POST handler.
+        category_path = CRUD_PREFIX + "/categoria/nueva"
+        category_payload = form_payload(client_a, category_path, {
+            "nombre": "Categoria creada por HTTP",
+            "descripcion": "Integracion",
+            "orden": "0",
+            "activa": "on",
+            # These fields are deliberately not part of the form; they must not
+            # let the browser choose tenant ownership or a public slug.
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "slug-controlado-por-cliente",
+        })
+        # Missing or hostile Origin/Referer must be rejected before writes.
+        hostile_payload = dict(category_payload)
+        hostile_payload["nombre"] = "Categoria CSRF no permitida"
+        hostile_data = urllib.parse.urlencode(hostile_payload, doseq=True).encode()
+        status, _ = request(
+            client_a, category_path, data=hostile_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "Origin": "https://attacker.invalid"},
+        )
+        if status != 403:
+            raise AssertionError("Cross-origin category POST should return 403, got HTTP %s" % status)
+        if db((db.categoria.negocio_id == seeded["a"][2]) &
+              (db.categoria.nombre == "Categoria CSRF no permitida")).count():
+            raise AssertionError("Cross-origin POST created a category despite rejection")
+
+        status, body = post_form(client_a, category_path, category_payload)
+        if status not in (200, 302, 303):
+            if status >= 500:
+                server.terminate()
+                output, _ = server.communicate(timeout=10)
+                raise RuntimeError(
+                    "Category create POST failed: HTTP %s %s. Server output: %s"
+                    % (status, body[-1000:], output[-12000:])
+                )
+            raise AssertionError("Category create POST failed: HTTP %s %s" % (status, body[-1000:]))
+        created_category = db(
+            (db.categoria.negocio_id == seeded["a"][2]) &
+            (db.categoria.nombre == "Categoria creada por HTTP")
+        ).select().first()
+        if not created_category:
+            raise AssertionError("Category POST returned without creating an owned category")
+        if created_category.negocio_id != seeded["a"][2]:
+            raise AssertionError("Tampered negocio_id changed category ownership")
+        if created_category.slug == "slug-controlado-por-cliente":
+            raise AssertionError("Tampered slug was trusted instead of generated server-side")
+
+        # Exercise category edit POST and prove tenant fields remain server-owned.
+        category_edit_path = CRUD_PREFIX + "/categoria/editar/%s" % created_category.id
+        category_edit_payload = form_payload(client_a, category_edit_path, {
+            "nombre": "Categoria editada por HTTP",
+            "descripcion": "Actualizada por prueba",
+            "orden": "2",
+            "activa": "on",
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "slug-manipulado-edicion",
+        })
+        status, body = post_form(client_a, category_edit_path, category_edit_payload)
+        if status not in (200, 302, 303):
+            raise AssertionError("Category edit POST failed: HTTP %s %s" % (status, body[-1000:]))
+        updated_category = db(db.categoria.id == created_category.id).select().first()
+        if (not updated_category or updated_category.nombre != "Categoria editada por HTTP"
+                or updated_category.negocio_id != seeded["a"][2]
+                or updated_category.slug == "slug-manipulado-edicion"):
+            raise AssertionError("Category edit did not preserve server-side ownership/slug")
+
+        # A foreign category must be rejected by the product form validator.
+        product_path = CRUD_PREFIX + "/producto/nuevo"
+        before_count = db(db.producto.negocio_id == seeded["a"][2]).count()
+        product_payload = form_payload(client_a, product_path, {
+            "nombre": "Producto con categoria ajena",
+            "descripcion": "Debe rechazarse",
+            "descripcion_corta": "Test HTTP",
+            "precio": "11.00",
+            "precio_anterior": "",
+            "moneda": "CUP",
+            "disponible": "on",
+            "en_oferta": "",
+            "stock": "1",
+            "sku": "HTTP-FOREIGN-CATEGORY",
+            "categoria_id": str(category_b),
+            "destacado": "",
+            "tags": "",
+            "peso": "",
+            "meta_keywords": "",
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "producto-slug-manipulado",
+        })
+        status, body = post_form(client_a, product_path, product_payload)
+        after_count = db(db.producto.negocio_id == seeded["a"][2]).count()
+        if status >= 500 or after_count != before_count:
+            raise AssertionError(
+                "Foreign category must be rejected without creating product: HTTP %s, count %s->%s, body=%s"
+                % (status, before_count, after_count, body[-1000:])
+            )
+
+        # A valid create/edit round trip must preserve server-side tenant ownership.
+        product_payload["nombre"] = "Producto creado por HTTP"
+        product_payload["categoria_id"] = str(created_category.id)
+        product_payload["sku"] = "HTTP-OWN-CATEGORY"
+        status, body = post_form(client_a, product_path, product_payload)
+        if status not in (200, 302, 303):
+            if status >= 500:
+                server.terminate()
+                output, _ = server.communicate(timeout=10)
+                raise RuntimeError(
+                    "Product create POST failed: HTTP %s %s. Server output: %s"
+                    % (status, body[-1000:], output[-12000:])
+                )
+            raise AssertionError("Product create POST failed: HTTP %s %s" % (status, body[-1000:]))
+        created_product = db(
+            (db.producto.negocio_id == seeded["a"][2]) &
+            (db.producto.nombre == "Producto creado por HTTP")
+        ).select().first()
+        if not created_product:
+            raise AssertionError("Product POST returned without creating an owned product")
+        if created_product.negocio_id != seeded["a"][2]:
+            raise AssertionError("Tampered negocio_id changed product ownership")
+        if created_product.slug == "producto-slug-manipulado":
+            raise AssertionError("Tampered product slug was trusted instead of generated server-side")
+
+        edit_path = CRUD_PREFIX + "/producto/editar/%s" % created_product.id
+        edit_payload = form_payload(client_a, edit_path, {
+            "nombre": "Producto editado por HTTP",
+            "descripcion": "Actualizado por prueba",
+            "descripcion_corta": "Editado",
+            "precio": "12.50",
+            "precio_anterior": "",
+            "moneda": "CUP",
+            "disponible": "on",
+            "en_oferta": "",
+            "stock": "2",
+            "sku": "HTTP-EDITED",
+            "categoria_id": str(created_category.id),
+            "destacado": "",
+            "tags": "",
+            "peso": "",
+            "meta_keywords": "",
+            "negocio_id": str(seeded["b"][2]),
+            "slug": "slug-producto-manipulado-edicion",
+        })
+        status, body = post_form(client_a, edit_path, edit_payload)
+        if status not in (200, 302, 303):
+            raise AssertionError("Product edit POST failed: HTTP %s %s" % (status, body[-1000:]))
+        updated = db(db.producto.id == created_product.id).select().first()
+        if (not updated or updated.nombre != "Producto editado por HTTP"
+                or updated.negocio_id != seeded["a"][2]
+                or updated.slug == "slug-producto-manipulado-edicion"):
+            raise AssertionError("Product edit did not preserve server-side ownership/slug")
+
+        # Merchant B's original product must remain untouched.
+        untouched = db(db.producto.id == product_b).select().first()
+        if not untouched or untouched.nombre != "Producto B" or untouched.negocio_id != seeded["b"][2]:
+            raise AssertionError("Merchant A changed Merchant B's product")
+        # Restart the HTTP application and verify the edited records are still
+        # available through authenticated merchant pages backed by the same DB.
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=5)
+        server = subprocess.Popen(
+            [
+                "py4web", "run", "--yes", "--host", "127.0.0.1", "--port", "8766",
+                "--app_names", "catalogo_cuba", "--server", "wsgiref",
+                "--quiet", "--watch", "off", "apps",
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=server_env,
+        )
+        ready = False
+        for _ in range(50):
+            if server.poll() is not None:
+                output = server.stdout.read().decode("utf-8", errors="replace")
+                raise RuntimeError("py4web failed after restart: " + output[-8000:])
+            try:
+                status, _ = request(urllib.request.build_opener(), APP_PREFIX + "/auth/login")
+                if status == 200:
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.4)
+        if not ready:
+            raise RuntimeError("py4web did not become ready after restart")
+        client_a_after_restart = login(email_a)
+        status, product_listing = request(client_a_after_restart, CRUD_PREFIX + "/productos")
+        if status != 200 or "Producto editado por HTTP" not in product_listing:
+            raise AssertionError("Edited product did not persist through application restart")
+        status, category_listing = request(client_a_after_restart, CRUD_PREFIX + "/categorias")
+        if status != 200 or "Categoria editada por HTTP" not in category_listing:
+            raise AssertionError("Edited category did not persist through application restart")
+
+        print("Authenticated CRUD HTTP integration passed: category create/edit, product create/edit, tampered tenant/slug fields ignored, foreign-category rejection, cross-tenant 404 isolation, and persistence after app restart.")
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=5)
+        db.commit()
+
+
+if __name__ == "__main__":
+    main()

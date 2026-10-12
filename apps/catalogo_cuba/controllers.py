@@ -3,12 +3,14 @@ Controladores - CatalogoCuba
 Define todas las acciones/rutas de la aplicacion (py4web)
 """
 import os
-from datetime import timedelta
-from urllib.parse import quote
+from decimal import Decimal, InvalidOperation
+from datetime import datetime, timedelta
+import uuid
+from urllib.parse import quote, urlsplit
 
 from py4web import action, request, response, redirect, URL, HTTP
 from py4web.utils.form import Form, FormStyleBulma
-from py4web.utils.factories import ActionFactory
+from py4web.core import Fixture
 from pydal.validators import IS_EMPTY_OR, IS_IN_DB
 
 from .common import (
@@ -24,10 +26,91 @@ from .common import (
 # ============================================================
 
 def get_client_ip():
-    return request.environ.get(
-        "HTTP_X_FORWARDED_FOR",
-        request.environ.get("REMOTE_ADDR", "")
-    )
+    """Obtiene la IP cliente sin confiar en cabeceras reenviadas arbitrarias.
+
+    Solo se usa X-Forwarded-For cuando REMOTE_ADDR coincide exactamente con
+    una IP configurada en TRUSTED_PROXY_IPS. El proxy de confianza debe
+    sobrescribir/limpiar esa cabecera y no aceptar valores del cliente sin validar.
+    """
+    remote_addr = (request.environ.get("REMOTE_ADDR") or "").strip()
+    trusted_proxies = getattr(settings, "TRUSTED_PROXY_IPS", ())
+    if remote_addr not in trusted_proxies:
+        return remote_addr
+
+    forwarded = request.environ.get("HTTP_X_FORWARDED_FOR", "")
+    # Con un proxy confiable que sobrescribe la cabecera, el primer valor
+    # representa la IP original del cliente.
+    candidate = forwarded.split(",", 1)[0].strip()
+    if not candidate:
+        return remote_addr
+    try:
+        import ipaddress
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return remote_addr
+
+
+def _peticion_mismo_origen():
+    """
+    Verifica Origin/Referer en endpoints mutables autenticados por cookie.
+    Si ambos encabezados faltan, rechaza la solicitud. Esta comprobacion
+    depende de la configuracion del proxy y no reemplaza tokens CSRF explícitos.
+    """
+    host = (request.environ.get("HTTP_HOST") or "").strip().lower()
+    origen = (request.environ.get("HTTP_ORIGIN") or "").strip()
+    referer = (request.environ.get("HTTP_REFERER") or "").strip()
+    candidato = origen or referer
+    if not host or not candidato:
+        return False
+    try:
+        parsed = urlsplit(candidato)
+        return parsed.scheme in ("http", "https") and parsed.netloc.lower() == host
+    except (TypeError, ValueError):
+        return False
+
+
+def _exigir_mismo_origen_en_post():
+    """Rechaza POST de formularios autenticados si no provienen del mismo origen.
+
+    Es una defensa adicional frente a CSRF basada en cookies. No sustituye
+    el token CSRF que pueda proporcionar el formulario/framework.
+    """
+    if request.method == "POST" and not _peticion_mismo_origen():
+        raise HTTP(403, "Origen de solicitud no permitido")
+
+
+def _rechazar_uploads_excesivos(nombres_campos):
+    """Corta antes de construir Form si un upload supera el limite de bytes."""
+    for nombre in nombres_campos:
+        archivo = request.files.get(nombre)
+        if not archivo or not getattr(archivo, "file", None):
+            continue
+        stream = archivo.file
+        try:
+            posicion = stream.tell()
+            stream.seek(0, os.SEEK_END)
+            tamano = stream.tell()
+            stream.seek(posicion)
+        except (AttributeError, OSError, ValueError):
+            raise HTTP(400, "No se pudo validar el archivo subido")
+        if tamano > settings.MAX_IMAGE_SIZE:
+            raise HTTP(413, "La imagen supera el limite permitido de 2 MiB")
+
+
+def _optimizar_upload_guardado(nombre_archivo, carpeta, anterior=None):
+    """Optimiza el archivo temporal almacenado por el widget upload de py4web."""
+    if not nombre_archivo:
+        return anterior
+    raiz = os.path.realpath(settings.UPLOAD_FOLDER)
+    ruta = os.path.realpath(os.path.join(raiz, nombre_archivo))
+    try:
+        if os.path.commonpath([raiz, ruta]) != raiz or not os.path.isfile(ruta):
+            return anterior
+        with open(ruta, "rb") as archivo:
+            optimizada = guardar_imagen(archivo, carpeta)
+        return optimizada or anterior
+    except (OSError, ValueError):
+        return anterior
 
 
 def _tiene_rol(user_id, rol):
@@ -88,7 +171,25 @@ def contexto_base():
 
 
 # ActionFactory con contexto comun; cada accion puede ampliarlo
-AccionBase = ActionFactory(contexto_base, db, session, auth.user)
+class ContextoBaseFixture(Fixture):
+    """Inyecta el contexto comun en las vistas que devuelven diccionarios."""
+
+    def __init__(self):
+        super().__init__()
+        # contexto_base consulta la sesion y la tabla auth_user.
+        # Declarar las dependencias permite a py4web preparar ambos fixtures.
+        self.__prerequisites__ = [session, db]
+
+    def on_request(self, context):
+        # Las vistas con sesión autenticada pueden contener navegación/acciones
+        # personalizadas; el navegador y el Service Worker no deben almacenarlas.
+        datos = contexto_base()
+        if datos.get("user"):
+            response.headers["Cache-Control"] = "private, no-store"
+        context["template_inject"].update(datos)
+
+
+AccionBase = (db, ContextoBaseFixture())
 
 
 # --- Preparadores de datos para las vistas --------------------------------
@@ -238,7 +339,7 @@ def _preparar_pago(p, negocio_nombre=None, usuario_email=None):
 # ============================================================
 
 @action("catalogo_cuba")
-@action.uses(AccionBase, "catalogo_home.html")
+@action.uses("catalogo_home.html", *AccionBase)
 def catalogo_home():
     negocios_raw = db(
         (db.negocio.activo == True) & (db.negocio.aprobado == True)
@@ -256,8 +357,23 @@ def catalogo_home():
     return dict(negocios=negocios, titulo="CatalogoCuba - Directorio de Negocios")
 
 
+# El Service Worker debe servirse desde la raíz de la aplicación para poder
+# controlar las páginas públicas; al servirse desde /static su alcance sería
+# demasiado limitado. El encabezado permite explícitamente el scope de la app.
+@action("catalogo_cuba/sw.js", method=["GET"])
+def service_worker():
+    response.headers["Service-Worker-Allowed"] = "/catalogo_cuba/"
+    response.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    ruta_sw = os.path.join(os.path.dirname(__file__), "static", "sw.js")
+    try:
+        with open(ruta_sw, "r", encoding="utf-8") as archivo:
+            return archivo.read()
+    except OSError:
+        raise HTTP(503, "Service Worker no disponible")
+
+
 @action("catalogo_cuba/negocio/<slug>")
-@action.uses(AccionBase, "catalogo_negocio.html")
+@action.uses("catalogo_negocio.html", *AccionBase)
 def catalogo_negocio(slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -270,24 +386,30 @@ def catalogo_negocio(slug):
     registrar_visita(negocio_id=negocio.id, ip=get_client_ip(),
                      user_agent=request.environ.get("HTTP_USER_AGENT", ""))
 
-    categorias_raw = db(
-        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
-    ).select(orderby=db.categoria.orden)
-    categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
-
-    destacados_raw = db(
-        (db.producto.negocio_id == negocio.id) &
-        (db.producto.disponible == True) &
-        (db.producto.destacado == True)
-    ).select(orderby=~db.producto.fecha_creacion, limitby=(0, 8))
-    destacados = [_preparar_producto(p, negocio) for p in destacados_raw]
-
-    productos_raw = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
-    ).select(orderby=~db.producto.fecha_creacion, limitby=(0, settings.PAGE_SIZE))
-    productos = [_preparar_producto(p, negocio) for p in productos_raw]
-
     suscripcion_activa = verificar_suscripcion_activa(negocio.id)
+    categorias = []
+    destacados = []
+    productos = []
+
+    # Mantener la pagina informativa, pero no exponer el catalogo si la
+    # suscripcion no esta activa.
+    if suscripcion_activa:
+        categorias_raw = db(
+            (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+        ).select(orderby=db.categoria.orden)
+        categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
+
+        destacados_raw = db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.disponible == True) &
+            (db.producto.destacado == True)
+        ).select(orderby=~db.producto.fecha_creacion, limitby=(0, 8))
+        destacados = [_preparar_producto(p, negocio) for p in destacados_raw]
+
+        productos_raw = db(
+            (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
+        ).select(orderby=~db.producto.fecha_creacion, limitby=(0, settings.PAGE_SIZE))
+        productos = [_preparar_producto(p, negocio) for p in productos_raw]
 
     return dict(
         negocio=negocio,
@@ -300,7 +422,7 @@ def catalogo_negocio(slug):
 
 
 @action("catalogo_cuba/negocio/<slug>/categoria/<categoria_slug>")
-@action.uses(AccionBase, "catalogo_negocio.html")
+@action.uses("catalogo_negocio.html", *AccionBase)
 def catalogo_por_categoria(slug, categoria_slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -320,25 +442,34 @@ def catalogo_por_categoria(slug, categoria_slug):
         (db.producto.categoria_id == categoria.id) &
         (db.producto.disponible == True)
     ).select(orderby=~db.producto.fecha_creacion)
-    productos = [_preparar_producto(p, negocio) for p in productos_raw]
+    suscripcion_activa = verificar_suscripcion_activa(negocio.id)
+    productos = []
+    categorias = []
+    if suscripcion_activa:
+        productos_raw = db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.categoria_id == categoria.id) &
+            (db.producto.disponible == True)
+        ).select(orderby=~db.producto.fecha_creacion)
+        productos = [_preparar_producto(p, negocio) for p in productos_raw]
 
-    categorias_raw = db(
-        (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
-    ).select(orderby=db.categoria.orden)
-    categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
+        categorias_raw = db(
+            (db.categoria.negocio_id == negocio.id) & (db.categoria.activa == True)
+        ).select(orderby=db.categoria.orden)
+        categorias = [{'id': c.id, 'nombre': c.nombre, 'slug': c.slug} for c in categorias_raw]
 
     return dict(
         negocio=negocio,
         categorias=categorias,
         destacados=[],
         productos=productos,
-        suscripcion_activa=verificar_suscripcion_activa(negocio.id),
+        suscripcion_activa=suscripcion_activa,
         titulo="%s - %s" % (categoria.nombre, negocio.nombre),
     )
 
 
 @action("catalogo_cuba/negocio/<slug>/producto/<producto_slug>")
-@action.uses(AccionBase, "catalogo_producto.html")
+@action.uses("catalogo_producto.html", *AccionBase)
 def catalogo_producto_detalle(slug, producto_slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -347,8 +478,13 @@ def catalogo_producto_detalle(slug, producto_slug):
     if not negocio:
         raise HTTP(404, "Negocio no encontrado")
 
+    if not verificar_suscripcion_activa(negocio.id):
+        raise HTTP(404, "Producto no encontrado")
+
     producto = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.slug == producto_slug)
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.slug == producto_slug) &
+        (db.producto.disponible == True)
     ).select().first()
     if not producto:
         raise HTTP(404, "Producto no encontrado")
@@ -362,7 +498,10 @@ def catalogo_producto_detalle(slug, producto_slug):
 
     relacionados = []
     if producto.categoria_id:
+        # Aislar los productos relacionados al mismo negocio: una categoria
+        # compartida o mal asignada no debe filtrar productos de otro comercio.
         rel_raw = db(
+            (db.producto.negocio_id == negocio.id) &
             (db.producto.categoria_id == producto.categoria_id) &
             (db.producto.id != producto.id) &
             (db.producto.disponible == True)
@@ -395,7 +534,7 @@ def catalogo_producto_detalle(slug, producto_slug):
 # ============================================================
 
 @action("catalogo_cuba/buscar")
-@action.uses(AccionBase, "catalogo_busqueda.html")
+@action.uses("catalogo_busqueda.html", *AccionBase)
 def catalogo_buscar():
     query_texto = request.query.get("q", "").strip()
     tipo = request.query.get("tipo", "productos")
@@ -418,6 +557,9 @@ def catalogo_buscar():
             for r in rows:
                 producto = r.producto
                 negocio = r.negocio
+                # Los negocios sin suscripción vigente no deben aparecer en la búsqueda pública.
+                if not verificar_suscripcion_activa(negocio.id):
+                    continue
                 resultados.append({
                     'producto': {
                         'id': producto.id,
@@ -445,7 +587,7 @@ def catalogo_buscar():
                 'slug': n.slug,
                 'descripcion': n.descripcion,
                 'logo': n.logo,
-            } for n in neg_raw]
+            } for n in neg_raw if verificar_suscripcion_activa(n.id)]
             total_negocios = len(negocios)
 
     return dict(
@@ -464,7 +606,7 @@ def catalogo_buscar():
 # ============================================================
 
 @action("catalogo_cuba/api/negocio/<slug>/catalogo")
-@action.uses(db, contexto_base)
+@action.uses(db)
 def api_catalogo_negocio(slug):
     negocio = db(
         (db.negocio.slug == slug) &
@@ -485,9 +627,30 @@ def api_catalogo_negocio(slug):
         'imagen': c.imagen,
     } for c in categorias_raw]
 
-    productos_raw = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.disponible == True)
-    ).select(orderby=~db.producto.fecha_creacion)
+    productos_query = (
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.disponible == True)
+    )
+    total_productos = db(productos_query).count()
+
+    # Sin parametro page se devuelve el catalogo completo para la cache local.
+    # Con page se entrega una pagina para el boton "Cargar mas".
+    pagina_raw = request.query.get("page")
+    if pagina_raw is not None:
+        try:
+            pagina = max(1, int(pagina_raw))
+        except (TypeError, ValueError):
+            return respuesta_json(exito=False, mensaje="Pagina invalida", codigo=400)
+        inicio = (pagina - 1) * settings.PAGE_SIZE
+        productos_raw = db(productos_query).select(
+            orderby=~db.producto.fecha_creacion,
+            limitby=(inicio, inicio + settings.PAGE_SIZE),
+        )
+    else:
+        pagina = 1
+        productos_raw = db(productos_query).select(
+            orderby=~db.producto.fecha_creacion
+        )
     productos = [_preparar_producto(p, negocio) for p in productos_raw]
 
     response.headers["Cache-Control"] = "public, max-age=3600"
@@ -505,25 +668,267 @@ def api_catalogo_negocio(slug):
         },
         categorias=categorias,
         productos=productos,
-        total_productos=len(productos),
+        total_productos=total_productos,
+        pagina=pagina,
+        total_paginas=(total_productos + settings.PAGE_SIZE - 1) // settings.PAGE_SIZE,
     )
 
 
 @action("catalogo_cuba/api/negocio/<slug>/producto/<producto_slug>")
-@action.uses(db, contexto_base)
+@action.uses(db)
 def api_producto_detalle(slug, producto_slug):
     negocio = db((db.negocio.slug == slug)).select().first()
-    if not negocio:
+    # No exponer catalogos pendientes de aprobacion o suspendidos.
+    if not negocio or not negocio.activo or not negocio.aprobado:
         return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
 
     producto = db(
-        (db.producto.negocio_id == negocio.id) & (db.producto.slug == producto_slug)
+        (db.producto.negocio_id == negocio.id) &
+        (db.producto.slug == producto_slug) &
+        (db.producto.disponible == True)
     ).select().first()
     if not producto:
+        # No revelar productos agotados/desactivados por la API publica.
         return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
+
+    if not verificar_suscripcion_activa(negocio.id):
+        return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
 
     response.headers["Cache-Control"] = "public, max-age=3600"
     return dict(exito=True, producto=_preparar_producto(producto, negocio, con_detalle=True))
+
+
+# ============================================================
+# API DE PEDIDOS PUBLICOS (aceptacion pendiente del comerciante)
+# ============================================================
+
+@action("catalogo_cuba/api/negocio/<slug>/pedidos", method=["POST"])
+@action.uses(db)
+def api_crear_pedido(slug):
+    """Registra una solicitud de pedido; no confirma ni descuenta inventario."""
+    # Limitar el cuerpo antes de parsear JSON para reducir abuso de memoria/CPU.
+    # El proxy de producción también debe imponer un límite equivalente.
+    longitud_raw = request.environ.get("CONTENT_LENGTH", "")
+    if longitud_raw:
+        try:
+            longitud = int(longitud_raw)
+        except (TypeError, ValueError):
+            return respuesta_json(exito=False, mensaje="Longitud de solicitud invalida", codigo=400)
+        if longitud < 0:
+            return respuesta_json(exito=False, mensaje="Longitud de solicitud invalida", codigo=400)
+        if longitud > settings.MAX_ORDER_REQUEST_SIZE:
+            return respuesta_json(exito=False, mensaje="La solicitud supera el tamaño permitido", codigo=413)
+
+    data = request.json
+    if not isinstance(data, dict):
+        return respuesta_json(exito=False, mensaje="Se esperaba un objeto JSON", codigo=400)
+
+    try:
+        client_uuid = str(uuid.UUID(str(data.get("client_uuid", ""))))
+    except (ValueError, TypeError, AttributeError):
+        return respuesta_json(exito=False, mensaje="Identificador de pedido invalido", codigo=400)
+
+    nombre = data.get("cliente_nombre")
+    telefono = data.get("cliente_telefono")
+    direccion = data.get("direccion_entrega", "")
+    notas = data.get("notas", "")
+    items = data.get("items")
+    if not isinstance(nombre, str) or not nombre.strip() or len(nombre.strip()) > 120:
+        return respuesta_json(exito=False, mensaje="Nombre del cliente obligatorio (maximo 120 caracteres)", codigo=400)
+    if not isinstance(telefono, str) or not telefono.strip() or len(telefono.strip()) > 40:
+        return respuesta_json(exito=False, mensaje="Telefono obligatorio (maximo 40 caracteres)", codigo=400)
+    if not isinstance(direccion, str) or len(direccion) > 300:
+        return respuesta_json(exito=False, mensaje="Direccion invalida", codigo=400)
+    if not isinstance(notas, str) or len(notas) > 2000:
+        return respuesta_json(exito=False, mensaje="Notas invalidas", codigo=400)
+    if not isinstance(items, list) or not items or len(items) > 50:
+        return respuesta_json(exito=False, mensaje="El pedido debe contener entre 1 y 50 lineas", codigo=400)
+
+    negocio = db(
+        (db.negocio.slug == slug) &
+        (db.negocio.activo == True) &
+        (db.negocio.aprobado == True)
+    ).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
+    # Resolver reintentos antes de validar la suscripcion: un pedido ya guardado
+    # debe seguir siendo reconocible aunque la suscripcion caduque despues.
+    existente = db(db.pedido.client_uuid == client_uuid).select().first()
+    if existente:
+        if existente.negocio_id != negocio.id:
+            return respuesta_json(exito=False, mensaje="Identificador ya utilizado", codigo=409)
+        return respuesta_json(
+            exito=True,
+            mensaje="Pedido ya recibido anteriormente",
+            datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
+        )
+
+    if not verificar_suscripcion_activa(negocio.id):
+        return respuesta_json(exito=False, mensaje="Catalogo no disponible temporalmente", codigo=403)
+
+    # Consolidar productos repetidos y validar cantidades antes de escribir.
+    cantidades = {}
+    for item in items:
+        if not isinstance(item, dict):
+            return respuesta_json(exito=False, mensaje="Linea de pedido invalida", codigo=400)
+        producto_id_raw = item.get("producto_id")
+        cantidad_raw = item.get("cantidad")
+        if isinstance(producto_id_raw, bool) or isinstance(cantidad_raw, bool):
+            return respuesta_json(exito=False, mensaje="Producto o cantidad invalida", codigo=400)
+        try:
+            producto_id = int(producto_id_raw)
+            cantidad = int(cantidad_raw)
+        except (TypeError, ValueError, OverflowError):
+            return respuesta_json(exito=False, mensaje="Producto o cantidad invalida", codigo=400)
+        if (str(producto_id) != str(producto_id_raw).strip() or
+                str(cantidad) != str(cantidad_raw).strip()):
+            return respuesta_json(exito=False, mensaje="Producto o cantidad debe ser un entero", codigo=400)
+        if producto_id <= 0 or cantidad < 1 or cantidad > 1000:
+            return respuesta_json(exito=False, mensaje="Producto o cantidad fuera de rango", codigo=400)
+        cantidades[producto_id] = cantidades.get(producto_id, 0) + cantidad
+        if cantidades[producto_id] > 1000:
+            return respuesta_json(exito=False, mensaje="Cantidad total fuera de rango", codigo=400)
+
+    lineas = []
+    moneda = None
+    total = Decimal("0.00")
+    for producto_id, cantidad in cantidades.items():
+        producto = db(
+            (db.producto.id == producto_id) &
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.disponible == True)
+        ).select().first()
+        if not producto:
+            return respuesta_json(exito=False, mensaje="Un producto ya no esta disponible", codigo=409)
+        if (producto.stock or 0) < cantidad:
+            return respuesta_json(exito=False, mensaje="Stock insuficiente para: %s" % producto.nombre, codigo=409)
+        if moneda is None:
+            moneda = producto.moneda
+        elif moneda != producto.moneda:
+            return respuesta_json(exito=False, mensaje="Todos los productos deben usar la misma moneda", codigo=400)
+        precio = Decimal(str(producto.precio or "0"))
+        subtotal = (precio * cantidad).quantize(Decimal("0.01"))
+        total += subtotal
+        lineas.append({
+            "producto_id": producto.id,
+            "nombre_producto": producto.nombre,
+            "cantidad": cantidad,
+            "precio_unitario": precio,
+            "subtotal": subtotal,
+        })
+
+    try:
+        pedido_id = db.pedido.insert(
+            client_uuid=client_uuid,
+            negocio_id=negocio.id,
+            cliente_nombre=nombre.strip(),
+            cliente_telefono=telefono.strip(),
+            direccion_entrega=direccion.strip(),
+            notas=notas.strip(),
+            estado="pendiente_revision",
+            moneda=moneda,
+            total=total,
+            fecha_creacion=datetime.utcnow(),
+        )
+        for linea in lineas:
+            db.pedido_item.insert(pedido_id=pedido_id, **linea)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Una carrera entre reintentos puede perder la restriccion UNIQUE.
+        existente = db(db.pedido.client_uuid == client_uuid).select().first()
+        if existente and existente.negocio_id == negocio.id:
+            return respuesta_json(
+                exito=True,
+                mensaje="Pedido ya recibido anteriormente",
+                datos={"pedido_id": existente.id, "estado": existente.estado, "duplicado": True},
+            )
+        if existente:
+            return respuesta_json(exito=False, mensaje="Identificador ya utilizado", codigo=409)
+        return respuesta_json(exito=False, mensaje="No se pudo guardar el pedido; puedes reintentar con el mismo identificador", codigo=500)
+
+    return respuesta_json(
+        exito=True,
+        mensaje="Solicitud recibida; el negocio debe confirmar disponibilidad",
+        datos={"pedido_id": pedido_id, "estado": "pendiente_revision", "duplicado": False},
+    )
+
+
+@action("catalogo_cuba/admin/pedidos/<pedido_id>/estado", method=["POST"])
+@action.uses(session, auth.user, db)
+def admin_actualizar_estado_pedido(pedido_id):
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
+    """Acepta o rechaza pedidos; la aceptacion descuenta stock de forma condicional."""
+    user = auth.get_user()
+    if not user or not es_comerciante(user):
+        return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
+
+    try:
+        pedido_id = int(pedido_id)
+    except (TypeError, ValueError, OverflowError):
+        return respuesta_json(exito=False, mensaje="Pedido no valido", codigo=400)
+    data = request.json
+    if pedido_id <= 0 or not isinstance(data, dict):
+        return respuesta_json(exito=False, mensaje="Solicitud invalida", codigo=400)
+    nuevo_estado = data.get("estado")
+    if nuevo_estado not in ("aceptado", "rechazado"):
+        return respuesta_json(exito=False, mensaje="Estado no permitido", codigo=400)
+
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
+    pedido = db(
+        (db.pedido.id == pedido_id) &
+        (db.pedido.negocio_id == negocio.id)
+    ).select().first()
+    if not pedido:
+        return respuesta_json(exito=False, mensaje="Pedido no encontrado", codigo=404)
+    if pedido.estado != "pendiente_revision":
+        return respuesta_json(exito=False, mensaje="El pedido ya fue procesado", codigo=409)
+
+    try:
+        if nuevo_estado == "aceptado":
+            lineas = db(db.pedido_item.pedido_id == pedido.id).select()
+            if not lineas:
+                return respuesta_json(exito=False, mensaje="El pedido no contiene productos", codigo=409)
+            # UPDATE condicional: la base de datos solo descuenta si sigue
+            # habiendo unidades suficientes. Si una linea falla, se revierte todo.
+            for linea in lineas:
+                actualizado = db(
+                    (db.producto.id == linea.producto_id) &
+                    (db.producto.negocio_id == negocio.id) &
+                    (db.producto.disponible == True) &
+                    (db.producto.stock >= linea.cantidad)
+                ).update(stock=db.producto.stock - linea.cantidad)
+                if actualizado != 1:
+                    db.rollback()
+                    return respuesta_json(
+                        exito=False,
+                        mensaje="Stock insuficiente o producto no disponible: %s" % linea.nombre_producto,
+                        codigo=409,
+                    )
+
+        # Compare-and-set del estado: solo una peticion puede procesar el pedido.
+        cambiado = db(
+            (db.pedido.id == pedido.id) &
+            (db.pedido.negocio_id == negocio.id) &
+            (db.pedido.estado == "pendiente_revision")
+        ).update(estado=nuevo_estado)
+        if cambiado != 1:
+            db.rollback()
+            return respuesta_json(exito=False, mensaje="El pedido ya fue procesado por otra solicitud", codigo=409)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el pedido", codigo=500)
+
+    return respuesta_json(
+        exito=True,
+        mensaje=("Pedido aceptado y stock actualizado" if nuevo_estado == "aceptado" else "Pedido rechazado"),
+        datos={"pedido_id": pedido.id, "estado": nuevo_estado},
+    )
 
 
 # ============================================================
@@ -531,7 +936,7 @@ def api_producto_detalle(slug, producto_slug):
 # ============================================================
 
 @action("catalogo_cuba/admin")
-@action.uses(AccionBase, "admin_dashboard.html")
+@action.uses("admin_dashboard.html", *AccionBase)
 def admin_dashboard():
     user = auth.get_user()
     if not user:
@@ -571,6 +976,24 @@ def admin_dashboard():
         (db.producto.stock <= 5) & (db.producto.disponible == True)
     ).select()
     bajo_stock = [{'id': p.id, 'nombre': p.nombre, 'stock': p.stock or 0} for p in bajo_stock_raw]
+    pedidos_raw = db(
+        (db.pedido.negocio_id == negocio.id) &
+        (db.pedido.estado == "pendiente_revision")
+    ).select(orderby=~db.pedido.fecha_creacion, limitby=(0, 30))
+    pedidos_pendientes = []
+    for pedido in pedidos_raw:
+        lineas_raw = db(db.pedido_item.pedido_id == pedido.id).select()
+        pedidos_pendientes.append({
+            "id": pedido.id,
+            "cliente_nombre": pedido.cliente_nombre,
+            "cliente_telefono": pedido.cliente_telefono,
+            "direccion_entrega": pedido.direccion_entrega or "",
+            "notas": pedido.notas or "",
+            "total": "%.2f" % pedido.total,
+            "moneda": pedido.moneda,
+            "fecha_creacion": pedido.fecha_creacion.strftime("%d/%m/%Y %H:%M") if pedido.fecha_creacion else "-",
+            "lineas": [{"nombre": linea.nombre_producto, "cantidad": linea.cantidad, "subtotal": "%.2f" % linea.subtotal} for linea in lineas_raw],
+        })
 
     return dict(
         negocio={
@@ -583,6 +1006,7 @@ def admin_dashboard():
         mas_vistos=mas_vistos,
         suscripcion=suscripcion,
         bajo_stock=bajo_stock,
+        pedidos_pendientes=pedidos_pendientes,
         titulo="Panel - %s" % negocio.nombre,
     )
 
@@ -592,11 +1016,12 @@ def admin_dashboard():
 # ============================================================
 
 @action("catalogo_cuba/admin/negocio/nuevo", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_negocio_form.html")
+@action.uses("admin_negocio_form.html", *AccionBase)
 def admin_negocio_nuevo():
+    _exigir_mismo_origen_en_post()
     user = auth.get_user()
-    if not user or not es_comerciante(user):
-        raise HTTP(403)
+    if not user:
+        redirect(URL("auth", "login"))
 
     if db(db.negocio.usuario_id == user["id"]).count() > 0:
         redirect(URL("catalogo_cuba", "admin"))
@@ -607,30 +1032,34 @@ def admin_negocio_nuevo():
         "color_tema", "moneda_principal", "mostrar_precios",
         "facebook", "instagram", "telegram", "meta_descripcion",
     ]
-    form = Form(db.negocio, fields=campos, deletable=False, formstyle=FormStyleBulma)
+    # El alta es manual: slug y usuario_id son obligatorios y no pertenecen al formulario público.
+    form = Form(db.negocio, fields=campos, deletable=False,
+                formstyle=FormStyleBulma, dbio=False)
 
     if form.accepted:
-        negocio_id = form.vars.get("id")
-        nombre = form.vars.get("nombre", "")
-        slug = slugify(nombre)
+        nombre = form.vars.get("nombre", "").strip()
+        slug_original = slugify(nombre)
+        slug = slug_original
         contador = 1
-        slug_original = slug
         while db(db.negocio.slug == slug).count() > 0:
             slug = "%s-%d" % (slug_original, contador)
             contador += 1
 
-        db(db.negocio.id == negocio_id).update(
+        ahora = ahora_cuba()
+        datos_negocio = {campo: form.vars.get(campo) for campo in campos}
+        datos_negocio.update(
             usuario_id=user["id"], slug=slug,
-            fecha_creacion=ahora_cuba(), fecha_actualizacion=ahora_cuba(),
+            fecha_creacion=ahora, fecha_actualizacion=ahora,
             activo=True, aprobado=False,
         )
+        negocio_id = db.negocio.insert(**datos_negocio)
         db.suscripcion.insert(
             negocio_id=negocio_id, usuario_id=user["id"],
-            fecha_inicio=ahora_cuba().date(),
-            fecha_fin=(ahora_cuba() + timedelta(days=settings.DIAS_PRUEBA_GRATIS)).date(),
+            fecha_inicio=ahora.date(),
+            fecha_fin=(ahora + timedelta(days=settings.DIAS_PRUEBA_GRATIS)).date(),
             estado="prueba", metodo_pago="prueba",
             monto_pagado=0, dias_prueba=settings.DIAS_PRUEBA_GRATIS,
-            fecha_creacion=ahora_cuba(),
+            fecha_creacion=ahora,
         )
         db.commit()
 
@@ -648,8 +1077,10 @@ def admin_negocio_nuevo():
 
 
 @action("catalogo_cuba/admin/negocio/editar", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_negocio_form.html")
+@action.uses("admin_negocio_form.html", *AccionBase)
 def admin_negocio_editar():
+    _exigir_mismo_origen_en_post()
+    _rechazar_uploads_excesivos(["logo"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -668,9 +1099,15 @@ def admin_negocio_editar():
                 deletable=False, formstyle=FormStyleBulma)
 
     if form.accepted:
+        slug_base = slugify(form.vars.get("nombre", negocio.nombre)) or "negocio"
+        slug = slug_base
+        contador = 1
+        while db((db.negocio.slug == slug) & (db.negocio.id != negocio.id)).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
         db(db.negocio.id == negocio.id).update(
             fecha_actualizacion=ahora_cuba(),
-            slug=slugify(form.vars.get("nombre", negocio.nombre)),
+            slug=slug,
         )
         db.commit()
         redirect(URL("catalogo_cuba", "admin"))
@@ -688,7 +1125,7 @@ def admin_negocio_editar():
 # ============================================================
 
 @action("catalogo_cuba/admin/productos")
-@action.uses(AccionBase, "admin_productos.html")
+@action.uses("admin_productos.html", *AccionBase)
 def admin_productos():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -737,8 +1174,10 @@ def admin_productos():
 
 
 @action("catalogo_cuba/admin/producto/nuevo", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_producto_form.html")
+@action.uses("admin_producto_form.html", *AccionBase)
 def admin_producto_nuevo():
+    _exigir_mismo_origen_en_post()
+    _rechazar_uploads_excesivos(["imagen_principal"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -757,36 +1196,48 @@ def admin_producto_nuevo():
         "stock", "sku", "categoria_id", "imagen_principal",
         "destacado", "tags", "peso", "meta_keywords",
     ]
-    form = Form(db.producto, fields=campos, deletable=False, formstyle=FormStyleBulma)
+    archivo = request.files.get("imagen_principal")
+    if archivo and archivo.file:
+        archivo.file.seek(0)
+    # py4web Form recibe Field objects, no nombres de campo. Al pasar una
+    # lista se desactiva DB I/O y la inserción se realiza explícitamente abajo.
+    form = Form(
+        [getattr(db.producto, nombre) for nombre in campos],
+        form_name="producto_nuevo", dbio=False, deletable=False,
+        formstyle=FormStyleBulma,
+    )
 
     if form.accepted:
-        producto_id = form.vars.get("id")
-        slug = slugify(form.vars.get("nombre", ""))
+        slug_base = slugify(form.vars.get("nombre", "")) or "producto"
+        slug = slug_base
         contador = 1
-        original = slug
         while db((db.producto.negocio_id == negocio.id) & (db.producto.slug == slug)).count() > 0:
-            slug = "%s-%d" % (original, contador)
+            slug = "%s-%d" % (slug_base, contador)
             contador += 1
 
-        imagen = None
-        archivo = request.files.get("imagen_principal")
-        if archivo and archivo.file:
-            imagen = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
-
-        db(db.producto.id == producto_id).update(
-            slug=slug, negocio_id=negocio.id, imagen_principal=imagen,
-            fecha_creacion=ahora_cuba(), fecha_actualizacion=ahora_cuba(),
-        )
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen_principal"}
+        imagen = form.vars.get("imagen_principal")
+        if archivo and archivo.file and imagen:
+            imagen = _optimizar_upload_guardado(imagen, "productos/%s" % negocio.id)
+        valores.update({
+            "slug": slug,
+            "negocio_id": negocio.id,
+            "imagen_principal": imagen,
+            "fecha_creacion": ahora_cuba(),
+            "fecha_actualizacion": ahora_cuba(),
+        })
+        db.producto.insert(**valores)
         db.commit()
         redirect(URL("catalogo_cuba", "admin", "productos"))
 
-    return dict(form=form, negocio=negocio, modo="crear",
+    return dict(form=form, negocio=negocio, modo="crear", producto=None,
                 titulo="Nuevo producto")
 
-
 @action("catalogo_cuba/admin/producto/editar/<producto_id:int>", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_producto_form.html")
+@action.uses("admin_producto_form.html", *AccionBase)
 def admin_producto_editar(producto_id):
+    _exigir_mismo_origen_en_post()
+    _rechazar_uploads_excesivos(["imagen_principal"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -811,35 +1262,51 @@ def admin_producto_editar(producto_id):
         "stock", "sku", "categoria_id", "imagen_principal",
         "destacado", "tags", "peso", "meta_keywords",
     ]
-    form = Form(db.producto, record=producto, fields=campos,
-                deletable=True, formstyle=FormStyleBulma)
+    archivo = request.files.get("imagen_principal")
+    if archivo and archivo.file:
+        archivo.file.seek(0)
+    form = Form(
+        [getattr(db.producto, nombre) for nombre in campos],
+        record=producto, form_name="producto_editar_%s" % producto_id,
+        dbio=False, deletable=False, formstyle=FormStyleBulma,
+    )
 
     if form.accepted:
-        imagen = producto.imagen_principal
-        archivo = request.files.get("imagen_principal")
-        if archivo and archivo.file:
-            nueva = guardar_imagen(archivo.file, "productos/%s" % negocio.id)
-            if nueva:
-                imagen = nueva
+        slug_base = slugify(form.vars.get("nombre", producto.nombre)) or "producto"
+        slug = slug_base
+        contador = 1
+        while db(
+            (db.producto.negocio_id == negocio.id) &
+            (db.producto.slug == slug) &
+            (db.producto.id != producto_id)
+        ).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
 
-        db(db.producto.id == producto_id).update(
-            slug=slugify(form.vars.get("nombre", producto.nombre)),
-            imagen_principal=imagen,
-            fecha_actualizacion=ahora_cuba(),
-        )
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen_principal"}
+        imagen = producto.imagen_principal
+        imagen_subida = form.vars.get("imagen_principal")
+        if archivo and archivo.file and imagen_subida:
+            imagen = _optimizar_upload_guardado(
+                imagen_subida, "productos/%s" % negocio.id, anterior=producto.imagen_principal
+            )
+        valores.update({
+            "slug": slug,
+            "imagen_principal": imagen,
+            "fecha_actualizacion": ahora_cuba(),
+        })
+        # La consulta incluye negocio_id para impedir editar productos ajenos.
+        db(
+            (db.producto.id == producto_id) & (db.producto.negocio_id == negocio.id)
+        ).update(**valores)
         db.commit()
         redirect(URL("catalogo_cuba", "admin", "productos"))
 
     return dict(form=form, negocio=negocio, producto=producto,
                 modo="editar", titulo="Editar: %s" % producto.nombre)
 
-
-# ============================================================
-# CRUD CATEGORIAS
-# ============================================================
-
 @action("catalogo_cuba/admin/categorias")
-@action.uses(AccionBase, "admin_categorias.html")
+@action.uses("admin_categorias.html", *AccionBase)
 def admin_categorias():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -869,8 +1336,10 @@ def admin_categorias():
 
 
 @action("catalogo_cuba/admin/categoria/nueva", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_categoria_form.html")
+@action.uses("admin_categoria_form.html", *AccionBase)
 def admin_categoria_nueva():
+    _exigir_mismo_origen_en_post()
+    _rechazar_uploads_excesivos(["imagen"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -879,27 +1348,40 @@ def admin_categoria_nueva():
     if not negocio:
         redirect(URL("catalogo_cuba", "admin"))
 
-    form = Form(db.categoria,
-                fields=["nombre", "descripcion", "imagen", "orden", "activa"],
-                deletable=False, formstyle=FormStyleBulma)
+    campos = ["nombre", "descripcion", "imagen", "orden", "activa"]
+    form = Form(
+        [getattr(db.categoria, nombre) for nombre in campos],
+        form_name="categoria_nueva", dbio=False, deletable=False,
+        formstyle=FormStyleBulma,
+    )
 
     if form.accepted:
-        cat_id = form.vars.get("id")
-        db(db.categoria.id == cat_id).update(
-            slug=slugify(form.vars.get("nombre", "")),
-            negocio_id=negocio.id,
-            fecha_creacion=ahora_cuba(),
-        )
+        slug_base = slugify(form.vars.get("nombre", "")) or "categoria"
+        slug = slug_base
+        contador = 1
+        while db((db.categoria.negocio_id == negocio.id) & (db.categoria.slug == slug)).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
+
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen"}
+        valores.update({
+            "imagen": form.vars.get("imagen"),
+            "slug": slug,
+            "negocio_id": negocio.id,
+            "fecha_creacion": ahora_cuba(),
+        })
+        db.categoria.insert(**valores)
         db.commit()
         redirect(URL("catalogo_cuba", "admin", "categorias"))
 
-    return dict(form=form, negocio=negocio, modo="crear",
+    return dict(form=form, negocio=negocio, categoria=None, modo="crear",
                 titulo="Nueva categoria")
 
-
 @action("catalogo_cuba/admin/categoria/editar/<categoria_id:int>", method=["GET", "POST"])
-@action.uses(AccionBase, "admin_categoria_form.html")
+@action.uses("admin_categoria_form.html", *AccionBase)
 def admin_categoria_editar(categoria_id):
+    _exigir_mismo_origen_en_post()
+    _rechazar_uploads_excesivos(["imagen"])
     user = auth.get_user()
     if not user or not es_comerciante(user):
         raise HTTP(403)
@@ -914,20 +1396,39 @@ def admin_categoria_editar(categoria_id):
     if not categoria:
         raise HTTP(404)
 
-    form = Form(db.categoria, record=categoria,
-                fields=["nombre", "descripcion", "imagen", "orden", "activa"],
-                deletable=True, formstyle=FormStyleBulma)
+    campos = ["nombre", "descripcion", "imagen", "orden", "activa"]
+    form = Form(
+        [getattr(db.categoria, nombre) for nombre in campos],
+        record=categoria, form_name="categoria_editar_%s" % categoria_id,
+        dbio=False, deletable=False, formstyle=FormStyleBulma,
+    )
 
     if form.accepted:
-        if not form.deleted:
-            db(db.categoria.id == categoria_id).update(
-                slug=slugify(form.vars.get("nombre", categoria.nombre)),
-            )
-            db.commit()
+        slug_base = slugify(form.vars.get("nombre", categoria.nombre)) or "categoria"
+        slug = slug_base
+        contador = 1
+        while db(
+            (db.categoria.negocio_id == negocio.id) &
+            (db.categoria.slug == slug) &
+            (db.categoria.id != categoria_id)
+        ).count() > 0:
+            slug = "%s-%d" % (slug_base, contador)
+            contador += 1
+
+        valores = {nombre: form.vars.get(nombre) for nombre in campos if nombre != "imagen"}
+        valores.update({
+            "imagen": form.vars.get("imagen") or categoria.imagen,
+            "slug": slug,
+        })
+        db(
+            (db.categoria.id == categoria_id) & (db.categoria.negocio_id == negocio.id)
+        ).update(**valores)
+        db.commit()
         redirect(URL("catalogo_cuba", "admin", "categorias"))
 
-    return dict(form=form, negocio=negocio, categoria=categoria,
-                modo="editar", titulo="Editar: %s" % categoria.nombre)
+    return dict(form=form, negocio=negocio, categoria=categoria, modo="editar",
+                titulo="Editar: %s" % categoria.nombre)
+
 
 
 # ============================================================
@@ -935,7 +1436,7 @@ def admin_categoria_editar(categoria_id):
 # ============================================================
 
 @action("catalogo_cuba/admin/inventario")
-@action.uses(AccionBase, "admin_inventario.html")
+@action.uses("admin_inventario.html", *AccionBase)
 def admin_inventario():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -977,42 +1478,63 @@ def admin_inventario():
 
 
 @action("catalogo_cuba/api/inventario/actualizar", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, db)
 def api_actualizar_stock():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
+    data = request.json
+    if not isinstance(data, dict):
+        return respuesta_json(exito=False, mensaje="Se esperaba un objeto JSON", codigo=400)
+
+    producto_id_raw = data.get("producto_id")
+    stock_raw = data.get("stock")
+    # No aceptar booleanos ni truncar decimales con int(1.5) -> 1.
+    if isinstance(producto_id_raw, bool) or isinstance(stock_raw, bool):
+        return respuesta_json(exito=False, mensaje="Producto o stock no valido", codigo=400)
     try:
-        data = request.json or {}
-        producto_id = data.get("producto_id")
-        nuevo_stock = data.get("stock")
+        producto_id = int(producto_id_raw)
+        nuevo_stock = int(stock_raw)
+    except (TypeError, ValueError, OverflowError):
+        return respuesta_json(exito=False, mensaje="Producto o stock no valido", codigo=400)
+    if (str(producto_id) != str(producto_id_raw).strip() or
+            str(nuevo_stock) != str(stock_raw).strip()):
+        return respuesta_json(exito=False, mensaje="Producto o stock debe ser un entero", codigo=400)
+    if producto_id <= 0 or nuevo_stock < 0 or nuevo_stock > 1000000:
+        return respuesta_json(exito=False, mensaje="El producto o stock esta fuera de rango", codigo=400)
 
-        negocio = db(db.negocio.usuario_id == user["id"]).select().first()
-        if not negocio:
-            return respuesta_json(exito=False, mensaje="Negocio no encontrado")
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
 
-        producto = db(
-            (db.producto.id == producto_id) & (db.producto.negocio_id == negocio.id)
-        ).select().first()
-        if not producto:
-            return respuesta_json(exito=False, mensaje="Producto no encontrado")
+    producto = db(
+        (db.producto.id == producto_id) &
+        (db.producto.negocio_id == negocio.id)
+    ).select().first()
+    if not producto:
+        return respuesta_json(exito=False, mensaje="Producto no encontrado", codigo=404)
 
+    try:
         db(db.producto.id == producto_id).update(
-            stock=int(nuevo_stock), fecha_actualizacion=ahora_cuba(),
+            stock=nuevo_stock, fecha_actualizacion=ahora_cuba(),
         )
         db.commit()
-        return respuesta_json(exito=True, mensaje="Stock actualizado")
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el inventario", codigo=500)
 
+    return respuesta_json(exito=True, mensaje="Stock actualizado")
 
 # ============================================================
 # SUSCRIPCION Y PAGOS (COMERCIANTE)
 # ============================================================
 
 @action("catalogo_cuba/admin/suscripcion")
-@action.uses(AccionBase, "admin_suscripcion.html")
+@action.uses("admin_suscripcion.html", *AccionBase)
 def admin_suscripcion():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1044,63 +1566,157 @@ def admin_suscripcion():
 
 
 @action("catalogo_cuba/admin/pago/realizar", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, db)
 def admin_realizar_pago():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     user = auth.get_user()
     if not user or not es_comerciante(user):
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
+    negocio = db(db.negocio.usuario_id == user["id"]).select().first()
+    if not negocio:
+        return respuesta_json(exito=False, mensaje="Negocio no encontrado", codigo=404)
+
+    # El cliente nunca decide libremente el precio: se calcula desde la tarifa del servidor.
+    metodo = (request.forms.get("metodo_pago") or "").strip().lower()
+    moneda = (request.forms.get("moneda") or "CUP").strip().upper()
+    referencia = (request.forms.get("referencia") or "").strip()
+
+    if metodo not in ("transfermovil", "presencial", "usdt"):
+        return respuesta_json(exito=False, mensaje="Metodo de pago no valido", codigo=400)
+
+    moneda_esperada = "USDT" if metodo == "usdt" else "CUP"
+    monto_esperado = (
+        Decimal(str(settings.COSTO_SUSCRIPCION_MENSUAL_USDT))
+        if moneda_esperada == "USDT"
+        else Decimal(str(settings.COSTO_SUSCRIPCION_MENSUAL_CUP))
+    )
+    if moneda != moneda_esperada:
+        return respuesta_json(
+            exito=False,
+            mensaje="La moneda no corresponde al metodo de pago seleccionado",
+            codigo=400,
+        )
+
     try:
-        negocio = db(db.negocio.usuario_id == user["id"]).select().first()
-        if not negocio:
-            return respuesta_json(exito=False, mensaje="Negocio no encontrado")
+        monto_recibido = Decimal((request.forms.get("monto") or "").strip())
+    except (InvalidOperation, AttributeError):
+        return respuesta_json(exito=False, mensaje="Monto no valido", codigo=400)
 
-        metodo = request.forms.get("metodo_pago")
-        monto = request.forms.get("monto")
-        moneda = request.forms.get("moneda", "CUP")
-        referencia = request.forms.get("referencia", "")
+    if not monto_recibido.is_finite() or monto_recibido != monto_esperado:
+        return respuesta_json(
+            exito=False,
+            mensaje="El importe debe coincidir con la tarifa vigente: %s %s"
+                    % (monto_esperado, moneda_esperada),
+            codigo=400,
+        )
 
-        suscripcion = db(
-            (db.suscripcion.negocio_id == negocio.id) &
-            db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])
-        ).select(orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)).first()
+    if len(referencia) > 100:
+        return respuesta_json(exito=False, mensaje="La referencia supera 100 caracteres", codigo=400)
+    if metodo in ("transfermovil", "usdt") and not referencia:
+        return respuesta_json(
+            exito=False,
+            mensaje="Debes indicar la referencia o hash de la transaccion",
+            codigo=400,
+        )
+    # Normalizar la referencia para bloquear variaciones por mayusculas/minusculas.
+    # La restriccion UNIQUE de la base de datos es la proteccion atomica frente
+    # a dos solicitudes concurrentes; esta consulta previa solo mejora el mensaje.
+    referencia_unica = ("%s:%s" % (metodo, referencia.casefold())) if referencia else None
+    if referencia and (
+        db(db.pago.referencia_unica == referencia_unica).count() > 0 or
+        db(
+            (db.pago.referencia == referencia) &
+            (db.pago.metodo_pago == metodo) &
+            (db.pago.estado.belongs(["pendiente", "en_proceso", "validado"]))
+        ).count() > 0
+    ):
+        return respuesta_json(
+            exito=False,
+            mensaje="Esta referencia ya esta registrada",
+            codigo=409,
+        )
 
+    suscripcion = db(
+        (db.suscripcion.negocio_id == negocio.id) &
+        db.suscripcion.estado.belongs(["activa", "prueba", "pendiente", "vencida"])
+    ).select(orderby=~db.suscripcion.fecha_creacion, limitby=(0, 1)).first()
+
+    # Una suscripción no debe acumular varios pagos abiertos: validar dos pagos
+    # distintos de la misma renovación ampliaría el plazo varias veces.
+    if suscripcion:
+        pago_abierto = db(
+            (db.pago.suscripcion_id == suscripcion.id) &
+            db.pago.estado.belongs(["pendiente", "en_proceso"])
+        ).select().first()
+        if pago_abierto:
+            return respuesta_json(
+                exito=False,
+                mensaje="Ya existe un pago pendiente de revisión para esta suscripción.",
+                codigo=409,
+            )
+
+    ahora = ahora_cuba()
+    try:
         if not suscripcion:
             suscripcion_id = db.suscripcion.insert(
                 negocio_id=negocio.id, usuario_id=user["id"],
-                fecha_inicio=ahora_cuba().date(),
-                fecha_fin=(ahora_cuba() + timedelta(days=30)).date(),
+                fecha_inicio=ahora.date(),
+                fecha_fin=(ahora + timedelta(days=30)).date(),
                 estado="pendiente", metodo_pago=metodo,
-                fecha_creacion=ahora_cuba(),
+                fecha_creacion=ahora,
             )
         else:
             suscripcion_id = suscripcion.id
+
+        pago_id = db.pago.insert(
+            suscripcion_id=suscripcion_id, negocio_id=negocio.id,
+            usuario_id=user["id"], monto=str(monto_esperado), moneda=moneda,
+            metodo_pago=metodo, estado="pendiente", referencia=referencia,
+            referencia_unica=referencia_unica,
+            suscripcion_abierta_id=suscripcion_id,
+            fecha_solicitud=ahora,
+        )
+        if suscripcion:
             db(db.suscripcion.id == suscripcion_id).update(
                 estado="pendiente", metodo_pago=metodo,
             )
         db.commit()
-
-        pago_id = db.pago.insert(
-            suscripcion_id=suscripcion_id, negocio_id=negocio.id,
-            usuario_id=user["id"], monto=float(monto), moneda=moneda,
-            metodo_pago=metodo, estado="pendiente", referencia=referencia,
-            fecha_solicitud=ahora_cuba(),
+    except Exception:
+        db.rollback()
+        # Si la restriccion UNIQUE ganó la carrera, informar conflicto y no error interno.
+        if referencia_unica and db(
+            db.pago.referencia_unica == referencia_unica
+        ).count() > 0:
+            return respuesta_json(
+                exito=False,
+                mensaje="Esta referencia ya esta registrada",
+                codigo=409,
+            )
+        if db(db.pago.suscripcion_abierta_id == suscripcion_id).count() > 0:
+            return respuesta_json(
+                exito=False,
+                mensaje="Ya existe un pago pendiente de revisión para esta suscripción.",
+                codigo=409,
+            )
+        return respuesta_json(
+            exito=False, mensaje="No se pudo registrar el pago. Intenta nuevamente.", codigo=500
         )
-        db.commit()
 
-        return respuesta_json(exito=True,
-                              mensaje="Pago registrado correctamente. Pendiente de validacion.",
-                              datos={"pago_id": pago_id})
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
-
+    return respuesta_json(
+        exito=True,
+        mensaje="Pago registrado correctamente. Pendiente de validacion manual.",
+        datos={"pago_id": pago_id},
+    )
 
 # ============================================================
 # ESTADISTICAS (COMERCIANTE)
 # ============================================================
 
 @action("catalogo_cuba/admin/estadisticas")
-@action.uses(AccionBase, "admin_estadisticas.html")
+@action.uses("admin_estadisticas.html", *AccionBase)
 def admin_estadisticas():
     user = auth.get_user()
     if not user or not es_comerciante(user):
@@ -1147,7 +1763,7 @@ def admin_estadisticas():
 # ============================================================
 
 @action("catalogo_cuba/superadmin")
-@action.uses(AccionBase, "superadmin_dashboard.html")
+@action.uses("superadmin_dashboard.html", *AccionBase)
 def superadmin_dashboard():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1210,7 +1826,7 @@ def superadmin_dashboard():
 # ============================================================
 
 @action("catalogo_cuba/superadmin/negocios")
-@action.uses(AccionBase, "superadmin_negocios.html")
+@action.uses("superadmin_negocios.html", *AccionBase)
 def superadmin_negocios():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1298,8 +1914,11 @@ def superadmin_negocios():
 
 
 @action("catalogo_cuba/superadmin/negocio/aprobar/<negocio_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, db)
 def superadmin_aprobar_negocio(negocio_id):
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1315,8 +1934,11 @@ def superadmin_aprobar_negocio(negocio_id):
 
 
 @action("catalogo_cuba/superadmin/negocio/toggle/<negocio_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, db)
 def superadmin_toggle_negocio(negocio_id):
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1338,7 +1960,7 @@ def superadmin_toggle_negocio(negocio_id):
 # ============================================================
 
 @action("catalogo_cuba/superadmin/usuarios")
-@action.uses(AccionBase, "superadmin_usuarios.html")
+@action.uses("superadmin_usuarios.html", *AccionBase)
 def superadmin_usuarios():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1389,8 +2011,11 @@ def superadmin_usuarios():
 
 
 @action("catalogo_cuba/superadmin/usuario/cambiar-rol/<usuario_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, db)
 def superadmin_cambiar_rol(usuario_id):
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1402,14 +2027,17 @@ def superadmin_cambiar_rol(usuario_id):
     if not usuario:
         return respuesta_json(exito=False, mensaje="Usuario no encontrado")
 
-    # Reemplazar roles: quitar los anteriores de la lista permitida y asignar el nuevo
-    for r in ["superadmin", "comerciante", "visitante"]:
-        if r != nuevo_rol:
-            try:
+    # Reemplazar roles en una transaccion para evitar estados parciales.
+    try:
+        roles_actuales = roles_tags.get(usuario_id) or []
+        for r in ["superadmin", "comerciante", "visitante"]:
+            if r != nuevo_rol and r in roles_actuales:
                 roles_tags.remove(usuario_id, r)
-            except Exception:
-                pass
-    asignar_rol(usuario_id, nuevo_rol)
+        asignar_rol(usuario_id, nuevo_rol)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo actualizar el rol", codigo=500)
 
     return respuesta_json(exito=True, mensaje="Rol actualizado")
 
@@ -1419,7 +2047,7 @@ def superadmin_cambiar_rol(usuario_id):
 # ============================================================
 
 @action("catalogo_cuba/superadmin/suscripciones")
-@action.uses(AccionBase, "superadmin_suscripciones.html")
+@action.uses("superadmin_suscripciones.html", *AccionBase)
 def superadmin_suscripciones():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1490,7 +2118,7 @@ def superadmin_suscripciones():
 # ============================================================
 
 @action("catalogo_cuba/superadmin/pagos")
-@action.uses(AccionBase, "superadmin_pagos.html")
+@action.uses("superadmin_pagos.html", *AccionBase)
 def superadmin_pagos():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1535,44 +2163,121 @@ def superadmin_pagos():
 
 
 @action("catalogo_cuba/superadmin/pago/validar/<pago_id:int>", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, db)
 def superadmin_validar_pago(pago_id):
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
     pago = db.pago[pago_id]
     if not pago:
-        return respuesta_json(exito=False, mensaje="Pago no encontrado")
+        return respuesta_json(exito=False, mensaje="Pago no encontrado", codigo=404)
 
     estado = request.forms.get("estado", "validado")
     notas = request.forms.get("notas", "")
     user = auth.get_user()
 
-    db(db.pago.id == pago_id).update(
-        estado=estado, fecha_validacion=ahora_cuba(),
-        validado_por=user["id"] if user else None,
-        notas_validacion=notas,
-    )
-    db.commit()
+    if not isinstance(notas, str) or len(notas) > 2000:
+        return respuesta_json(exito=False, mensaje="Las notas no pueden superar 2000 caracteres", codigo=400)
 
-    if estado == "validado":
-        suscripcion = db.suscripcion[pago.suscripcion_id]
-        if suscripcion:
-            base = max(suscripcion.fecha_fin, ahora_cuba().date()) if suscripcion.fecha_fin else ahora_cuba().date()
+    if estado not in ("validado", "rechazado", "en_proceso", "pendiente"):
+        return respuesta_json(exito=False, mensaje="Estado de pago no valido", codigo=400)
+
+    # Un pago validado es terminal: no permitir revertirlo ni revalidarlo
+    # para evitar que la misma transaccion extienda varias veces la suscripcion.
+    if pago.estado == "validado":
+        if estado == "validado":
+            return respuesta_json(
+                exito=True,
+                mensaje="Este pago ya fue validado; no se aplicaron cambios.",
+            )
+        return respuesta_json(
+            exito=False,
+            mensaje="Un pago validado no puede cambiar de estado.",
+            codigo=409,
+        )
+
+    # Compare-and-set: solo actualiza si el estado sigue siendo el que leimos.
+    # Evita que dos solicitudes concurrentes validen el mismo pago basandose
+    # ambas en un estado antiguo.
+    ahora = ahora_cuba()
+    try:
+        actualizado = db(
+            (db.pago.id == pago_id) & (db.pago.estado == pago.estado)
+        ).update(
+            estado=estado,
+            suscripcion_abierta_id=(
+                None if estado in ("validado", "rechazado") else pago.suscripcion_id
+            ),
+            fecha_validacion=ahora,
+            validado_por=user["id"] if user else None,
+            notas_validacion=notas,
+        )
+
+        if actualizado != 1:
+            db.rollback()
+            pago_actual = db.pago[pago_id]
+            if pago_actual and pago_actual.estado == "validado":
+                return respuesta_json(
+                    exito=True,
+                    mensaje="Este pago ya fue validado; no se aplicaron cambios.",
+                )
+            return respuesta_json(
+                exito=False,
+                mensaje="El pago cambio mientras se procesaba. Recarga e intenta nuevamente.",
+                codigo=409,
+            )
+
+        if estado == "validado":
+            suscripcion = db.suscripcion[pago.suscripcion_id]
+            if not suscripcion:
+                db.rollback()
+                return respuesta_json(
+                    exito=False,
+                    mensaje="No se encontro la suscripcion asociada al pago",
+                    codigo=409,
+                )
+
+            fecha_actual = ahora.date()
+            base = max(suscripcion.fecha_fin, fecha_actual) if suscripcion.fecha_fin else fecha_actual
             nueva_fecha_fin = base + timedelta(days=30)
             db(db.suscripcion.id == pago.suscripcion_id).update(
-                estado="activa", fecha_fin=nueva_fecha_fin,
-                fecha_pago=ahora_cuba(),
-                monto_pagado=pago.monto, moneda_pago=pago.moneda,
+                estado="activa",
+                fecha_fin=nueva_fecha_fin,
+                fecha_pago=ahora,
+                monto_pagado=pago.monto,
+                moneda_pago=pago.moneda,
             )
             db.notificacion.insert(
-                usuario_id=pago.usuario_id, tipo="pago_validado",
+                usuario_id=pago.usuario_id,
+                tipo="pago_validado",
                 titulo="Pago validado",
                 mensaje="Su pago de %s %s ha sido validado. Su suscripcion esta activa hasta %s." % (
                     pago.monto, pago.moneda, nueva_fecha_fin.strftime('%d/%m/%Y')),
-                fecha_creacion=ahora_cuba(),
+                fecha_creacion=ahora,
             )
-            db.commit()
+
+        # Pago, suscripcion y notificacion se confirman en una sola transaccion.
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Si otra validación abrió un pago para la misma suscripción mientras
+        # se procesaba este cambio, devolver conflicto en vez de error interno.
+        if estado not in ("validado", "rechazado") and db(
+            db.pago.suscripcion_abierta_id == pago.suscripcion_id
+        ).count() > 0:
+            return respuesta_json(
+                exito=False,
+                mensaje="Ya existe otro pago abierto para esta suscripción.",
+                codigo=409,
+            )
+        return respuesta_json(
+            exito=False,
+            mensaje="No se pudo procesar la validacion del pago. Intenta nuevamente.",
+            codigo=500,
+        )
 
     return respuesta_json(exito=True, mensaje="Pago %s correctamente" % estado)
 
@@ -1582,7 +2287,7 @@ def superadmin_validar_pago(pago_id):
 # ============================================================
 
 @action("catalogo_cuba/superadmin/configuracion")
-@action.uses(AccionBase, "superadmin_configuracion.html")
+@action.uses("superadmin_configuracion.html", *AccionBase)
 def superadmin_configuracion():
     user = auth.get_user()
     if not es_superadmin(user):
@@ -1598,8 +2303,11 @@ def superadmin_configuracion():
 
 
 @action("catalogo_cuba/superadmin/configuracion/guardar", method=["POST"])
-@action.uses(db, session, auth.user, contexto_base)
+@action.uses(session, auth.user, db)
 def superadmin_guardar_configuracion():
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     if not es_superadmin():
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
@@ -1622,8 +2330,9 @@ def superadmin_guardar_configuracion():
             )
         db.commit()
         return respuesta_json(exito=True, mensaje="Configuracion guardada")
-    except Exception as e:
-        return respuesta_json(exito=False, mensaje="Error: %s" % str(e))
+    except Exception:
+        db.rollback()
+        return respuesta_json(exito=False, mensaje="No se pudo guardar la configuracion", codigo=500)
 
 
 # ============================================================
@@ -1631,7 +2340,7 @@ def superadmin_guardar_configuracion():
 # ============================================================
 
 @action("catalogo_cuba/api/notificaciones")
-@action.uses(db, session, auth.user)
+@action.uses(session, auth.user, db)
 def api_notificaciones():
     user = auth.get_user()
     if not user:
@@ -1655,16 +2364,21 @@ def api_notificaciones():
 
 
 @action("catalogo_cuba/api/notificacion/leer/<notificacion_id:int>", method=["POST"])
-@action.uses(db, session, auth.user)
+@action.uses(session, auth.user, db)
 def api_marcar_leida(notificacion_id):
+    if not _peticion_mismo_origen():
+        return respuesta_json(exito=False, mensaje="Origen de solicitud no permitido", codigo=403)
+
     user = auth.get_user()
     if not user:
         return respuesta_json(exito=False, mensaje="No autorizado", codigo=403)
 
-    db(
+    actualizadas = db(
         (db.notificacion.id == notificacion_id) &
         (db.notificacion.usuario_id == user["id"])
     ).update(leida=True, fecha_lectura=ahora_cuba())
+    if actualizadas != 1:
+        return respuesta_json(exito=False, mensaje="Notificacion no encontrada", codigo=404)
     db.commit()
     return respuesta_json(exito=True, mensaje="Notificacion marcada como leida")
 
@@ -1692,17 +2406,27 @@ def verificar_suscripcion_activa(negocio_id):
 @action("catalogo_cuba/uploads/<filename:path>")
 @action.uses()
 def serve_uploads(filename):
-    ruta = os.path.join(settings.UPLOAD_FOLDER, filename)
-    if not os.path.exists(ruta):
+    # Resolver rutas antes de abrir archivos y garantizar que permanezcan
+    # dentro del directorio de uploads, incluso ante rutas manipuladas.
+    raiz_uploads = os.path.realpath(settings.UPLOAD_FOLDER)
+    ruta = os.path.realpath(os.path.join(raiz_uploads, filename))
+    try:
+        dentro_de_uploads = os.path.commonpath([raiz_uploads, ruta]) == raiz_uploads
+    except ValueError:
+        dentro_de_uploads = False
+    if not dentro_de_uploads or not os.path.isfile(ruta):
         raise HTTP(404, "Archivo no encontrado")
 
-    ext = os.path.splitext(filename)[1].lower()
+    ext = os.path.splitext(ruta)[1].lower()
     content_type = {
         ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
-    }.get(ext, "application/octet-stream")
+    }.get(ext)
+    if not content_type:
+        raise HTTP(404, "Archivo no encontrado")
 
     response.headers["Content-Type"] = content_type
+    response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "public, max-age=86400"
     with open(ruta, "rb") as f:
         return f.read()

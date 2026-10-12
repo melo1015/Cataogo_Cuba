@@ -1,103 +1,66 @@
-"""
-Configuracion de la aplicacion CatalogoCuba
-Optimizado para conexiones lentas e inestables
-"""
+"""Configuracion de CatalogoCuba: valores seguros para desarrollo y produccion."""
 import os
 
-# ============================================================
-# ENTORNO
-# ============================================================
+# Entorno explícito: en producción no se permite activar DEBUG por accidente.
+ENVIRONMENT = os.environ.get("CATALOGO_CUBA_ENV", "development").strip().lower()
+IS_PRODUCTION = ENVIRONMENT == "production"
+DEBUG_REQUESTED = os.environ.get(
+    "CATALOGO_CUBA_DEBUG", "0" if IS_PRODUCTION else "1"
+).strip() == "1"
+DEBUG = DEBUG_REQUESTED and not IS_PRODUCTION
 
-# Modo debug - False en produccion
-DEBUG = os.environ.get("CATALOGO_CUBA_DEBUG", "1") == "1"
+# En producción (o con DEBUG desactivado) no se acepta una clave predecible.
+SESSION_SECRET_KEY = os.environ.get("CATALOGO_CUBA_SECRET", "").strip()
+if not SESSION_SECRET_KEY:
+    if IS_PRODUCTION or not DEBUG:
+        raise RuntimeError(
+            "Falta CATALOGO_CUBA_SECRET: define una clave aleatoria antes de iniciar "
+            "CatalogoCuba con debug desactivado o en produccion."
+        )
+    SESSION_SECRET_KEY = "catalogo-cuba-local-only-not-for-production"
 
-# ============================================================
-# BASE DE DATOS - SQLite para facilitar despliegue en Cuba
-# ============================================================
-
+# Base de datos. En despliegues con SQLite, el archivo debe residir en un volumen persistente.
 DB_URI = os.environ.get("CATALOGO_CUBA_DB_URI", "sqlite://storage.db")
-DB_POOL_SIZE = 0   # SQLite no usa pool
+DB_POOL_SIZE = 0
 DB_MIGRATE = True
 DB_FAKE_MIGRATE = False
 DB_MIGRATE_DIR = os.path.join(os.path.dirname(__file__), "databases")
 
-# ============================================================
-# DIRECTORIO DE UPLOADS
-# ============================================================
+# Los uploads deben persistir entre reinicios y estar fuera de directorios efímeros.
+UPLOAD_FOLDER = os.path.abspath(os.environ.get(
+    "CATALOGO_CUBA_UPLOAD_FOLDER",
+    os.path.join(os.path.dirname(__file__), "uploads")
+))
 
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
-
-# ============================================================
-# SESIONES
-# ============================================================
-
-# Clave secreta para sesiones - CAMBIAR EN PRODUCCION
-# En produccion, define la variable de entorno CATALOGO_CUBA_SECRET.
-SESSION_SECRET_KEY = os.environ.get(
-    "CATALOGO_CUBA_SECRET",
-    "catalogo-cuba-dev-secret-key-cambiar-en-produccion"
-)
-
-# Configuracion de sesiones
 SESSION_TYPE = "cookie"
-SESSION_SECURE = os.environ.get("CATALOGO_CUBA_SECURE", "0") == "1"
 SESSION_SAMESITE = "Lax"
-SESSION_EXPIRATION = 3600 * 24 * 7   # 7 dias
+SESSION_EXPIRATION = 3600 * 24 * 7
 
-# ============================================================
-# AUTENTICACION
-# ============================================================
-
-AUTH_PASSWORD_MIN_LENGTH = 6
-
-# En py4web, 'registration_requires_confirmation' existe como parametro.
-# 'registration_requires_approval' NO existe como parametro de Auth.
-# La aprobacion manual se implementa con un hook on_signup en models.py.
+AUTH_PASSWORD_MIN_LENGTH = 10
 AUTH_REGISTRATION_REQUIRES_CONFIRMATION = False
-AUTH_REGISTRATION_REQUIRES_APPROVAL = False   # Ver on_signup en models.py
-
-# ============================================================
-# CORREO (opcional, no usado actualmente)
-# ============================================================
+AUTH_REGISTRATION_REQUIRES_APPROVAL = False  # La aprobacion de negocios se controla en la app.
 
 SMTP_SERVER = None
 SMTP_SENDER = None
 
-# ============================================================
-# MONEDA Y PRECIOS
-# ============================================================
-
 MONEDA_LOCAL = "CUP"
 MONEDA_EXTRANJERA = "USDT"
-
-# Costos de suscripcion
 COSTO_SUSCRIPCION_MENSUAL_CUP = 1500
 COSTO_SUSCRIPCION_MENSUAL_USDT = 5.0
-
-# Dias de prueba gratuita
 DIAS_PRUEBA_GRATIS = 30
 
-# ============================================================
-# IMAGENES
-# ============================================================
-
-# Tamano maximo de imagen en upload (2MB)
 MAX_IMAGE_SIZE = 2 * 1024 * 1024
-
-# Dimensiones de imagen optimizadas
+# Limite del JSON enviado a la API publica de pedidos (antes del parseo).
+MAX_ORDER_REQUEST_SIZE = 64 * 1024
+# IPs exactas de proxies inversos confiables, separadas por coma.
+# Ejemplo: CATALOGO_CUBA_TRUSTED_PROXY_IPS=127.0.0.1,10.0.0.10
+# Dejar vacio si la app no recibe trafico desde un proxy confiable.
+TRUSTED_PROXY_IPS = tuple(
+    ip.strip() for ip in os.environ.get("CATALOGO_CUBA_TRUSTED_PROXY_IPS", "").split(",")
+    if ip.strip()
+)
 IMAGE_THUMBNAIL_SIZE = (300, 300)
 IMAGE_MEDIUM_SIZE = (600, 600)
 IMAGE_QUALITY = 75
-
-# ============================================================
-# PAGINACION
-# ============================================================
-
-# Ligero para conexiones lentas
 PAGE_SIZE = 12
-
-# ============================================================
-# CACHE / MODO OFFLINE
-# ============================================================
-
-CACHE_MAX_AGE = 3600   # 1 hora
+CACHE_MAX_AGE = 3600

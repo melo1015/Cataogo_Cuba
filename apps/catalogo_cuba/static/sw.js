@@ -9,15 +9,15 @@
  * - CSS/JS: Cache-first
  */
 
-const CACHE_NAME = 'catalogocuba-v1';
-const STATIC_CACHE = 'catalogocuba-static-v1';
-const IMAGE_CACHE = 'catalogocuba-images-v1';
-const API_CACHE = 'catalogocuba-api-v1';
+const CACHE_NAME = 'catalogocuba-v2';
+const STATIC_CACHE = 'catalogocuba-static-v2';
+const IMAGE_CACHE = 'catalogocuba-images-v2';
+const API_CACHE = 'catalogocuba-api-v2';
 
 // Recursos estaticos criticos para cachear inmediatamente
 const PRECACHE_ASSETS = [
-    '/catalogo_cuba/',
     '/catalogo_cuba/static/manifest.json',
+    '/catalogo_cuba/static/offline.html',
 ];
 
 // ============================================================
@@ -69,12 +69,20 @@ self.addEventListener('fetch', event => {
     // Solo manejar peticiones del mismo origen o de la app
     if (!url.pathname.startsWith('/catalogo_cuba')) return;
     
-    // 1. API endpoints (catalogo JSON) - Network-first con cache
+    // No guardar respuestas personalizadas en Cache Storage. Las APIs privadas
+    // (notificaciones, administración, etc.) deben ir siempre a la red.
+    if (/\/(admin|superadmin|auth)(\/|$)/i.test(url.pathname) ||
+        /\/api\/(notificaciones|notificacion|inventario)(\/|$)/i.test(url.pathname)) {
+        return;
+    }
+
+    // 1. Solo cachear APIs públicas del catálogo. No cachear otras APIs.
     if (url.pathname.includes('/api/')) {
+        if (!url.pathname.includes('/api/negocio/')) return;
         event.respondWith(networkFirst(request, API_CACHE));
         return;
     }
-    
+
     // 2. Imagenes subidas - Cache-first
     if (url.pathname.includes('/uploads/')) {
         event.respondWith(cacheFirst(request, IMAGE_CACHE));
@@ -154,17 +162,36 @@ async function networkFirst(request, cacheName) {
  * Stale-while-revalidate: Sirve del cache inmediatamente, actualiza en background
  * Ideal para paginas HTML
  */
+function respuestaCacheable(response) {
+    const control = (response.headers.get('Cache-Control') || '').toLowerCase();
+    return !control.includes('no-store') && !control.includes('private');
+}
+
 async function staleWhileRevalidate(request, cacheName) {
     const cache = await caches.open(cacheName);
     const cached = await cache.match(request);
-    
+
     const fetchPromise = fetch(request).then(networkResponse => {
-        if (networkResponse.ok) {
+        if (networkResponse.ok && respuestaCacheable(networkResponse)) {
             cache.put(request, networkResponse.clone());
+        } else if (!respuestaCacheable(networkResponse)) {
+            // Eliminar una copia anterior si el servidor ahora marca la página
+            // como privada/no-store (por ejemplo, tras iniciar sesión).
+            cache.delete(request);
         }
         return networkResponse;
-    }).catch(() => cached);
-    
+    }).catch(async () => {
+        if (cached) return cached;
+        // Navegación no visitada anteriormente: muestra una pantalla offline
+        // explícita en lugar de devolver null y dejar fallar la navegación.
+        return (await cache.match('/catalogo_cuba/static/offline.html')) ||
+            new Response('Sin conexión. Abre una página visitada previamente.', {
+                status: 503,
+                statusText: 'Offline',
+                headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+            });
+    });
+
     return cached || fetchPromise;
 }
 
@@ -191,14 +218,13 @@ async function servirCatalogoOffline(request) {
     // Retornar una respuesta que el frontend JS manejara
     // El frontend ya deberia tener los datos en localStorage
     return new Response(
-        JSON.stringify({ 
-            exito: true, 
+        JSON.stringify({
+            exito: false,
             offline: true,
             negocio_slug: negocioSlug,
-            mensaje: 'Modo offline - usando datos locales',
-            source: 'service_worker_cache_check'
+            mensaje: 'Sin conexión y sin copia del catálogo en la caché de red.'
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
     );
 }
 
@@ -208,14 +234,72 @@ async function servirCatalogoOffline(request) {
 
 self.addEventListener('sync', event => {
     if (event.tag === 'sync-catalogo') {
-        event.waitUntil(sincronizarCatalogo());
+        event.waitUntil(sincronizarPedidosPendientes());
     }
 });
 
-async function sincronizarCatalogo() {
-    const clients = await self.clients.matchAll({ type: 'window' });
-    clients.forEach(client => {
-        client.postMessage({ type: 'SYNC_COMPLETE', message: 'Sincronizacion completada' });
+// Background Sync funciona aunque no haya una pestaña abierta en navegadores compatibles.
+// La misma clave client_uuid permite reintentar sin crear pedidos duplicados.
+async function sincronizarPedidosPendientes() {
+    const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open('catalogocuba-orders-v1', 1);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    try {
+        const orders = await new Promise((resolve, reject) => {
+            const req = db.transaction('orders', 'readonly').objectStore('orders').getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+        for (const order of orders) {
+            if (order.status !== 'pending') continue;
+            try {
+                const response = await fetch(order.endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(order.payload)
+                });
+                const result = await response.json();
+                if (response.ok && result.exito) {
+                    order.status = 'received';
+                    order.server_result = result.datos || {};
+                    order.last_error = '';
+                } else if (response.status >= 500 || response.status === 429) {
+                    // Rechazo temporal: pedir al navegador otro intento.
+                    throw new Error('Error temporal del servidor');
+                } else {
+                    order.status = 'error';
+                    order.last_error = result.mensaje || 'Pedido rechazado por el servidor';
+                }
+                await guardarPedidoEnCola(db, order);
+            } catch (error) {
+                if (error && error.message === 'Error temporal del servidor') {
+                    db.close();
+                    throw error;
+                }
+                order.status = 'pending';
+                order.last_error = 'Sin conexión o respuesta del servidor';
+                await guardarPedidoEnCola(db, order);
+                db.close();
+                throw error;
+            }
+        }
+        db.close();
+        const clients = await self.clients.matchAll({ type: 'window' });
+        clients.forEach(client => client.postMessage({ type: 'SYNC_QUEUE_UPDATED' }));
+    } catch (error) {
+        // Rechazar event.waitUntil para que el navegador pueda reintentar.
+        throw error;
+    }
+}
+
+function guardarPedidoEnCola(db, order) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('orders', 'readwrite');
+        tx.objectStore('orders').put(order);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
     });
 }
 

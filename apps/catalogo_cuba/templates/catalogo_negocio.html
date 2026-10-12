@@ -39,6 +39,25 @@
 </section>
 
 <section class="container mt-3">
+    <div id="pedido-panel" class="card" style="padding:1rem;margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+            <div><strong>🛒 Mi pedido</strong><div id="pedido-resumen" class="text-sm">Aún no has añadido productos</div></div>
+            <button type="button" id="pedido-toggle" class="btn btn-primary">Ver pedido (0)</button>
+        </div>
+        <div id="pedido-contenido" hidden style="margin-top:1rem">
+            <div id="pedido-lineas"></div>
+            <form id="pedido-form" style="display:grid;gap:.65rem;max-width:600px;margin-top:1rem">
+                <label>Nombre *<input class="form-control" name="cliente_nombre" maxlength="120" required autocomplete="name"></label>
+                <label>Teléfono *<input class="form-control" name="cliente_telefono" maxlength="40" required autocomplete="tel"></label>
+                <label>Dirección de entrega<input class="form-control" name="direccion_entrega" maxlength="300" autocomplete="street-address"></label>
+                <label>Notas<textarea class="form-control" name="notas" maxlength="2000" rows="2"></textarea></label>
+                <button type="submit" class="btn btn-primary">Enviar / guardar pedido</button>
+            </form>
+            <p id="pedido-estado" role="status" aria-live="polite" class="text-sm"></p>
+            <h3 style="font-size:1rem;margin-top:1rem">Pedidos guardados en este dispositivo</h3>
+            <ul id="pedido-pendientes" class="text-sm"></ul>
+        </div>
+    </div>
     <!-- Tabs de categorias -->
     <div class="tabs">
         <a href="[[=URL('catalogo_cuba', 'negocio', negocio.slug)]]" class="tab active">🏠 Todos</a>
@@ -141,72 +160,282 @@
 
 [[block scripts]]
 <script>
-(function(){
-    const contenedor = document.getElementById('catalogo-productos');
-    if (!contenedor) return;
+(function () {
+    const grid = document.getElementById('catalogo-productos');
+    const slug = grid && grid.dataset.negocioSlug;
+    if (!slug) return;
+    const apiUrl = grid.dataset.urlApiCatalogo.replace(/\/catalogo$/, '/pedidos');
+    const storeKey = 'catalogocuba-cart-' + slug;
+    const dbName = 'catalogocuba-orders-v1';
+    const queueStore = 'orders';
+    let cart = {};
+    let catalog = null;
 
-    const negocioSlug = contenedor.dataset.negocioSlug;
-    const urlBaseNegocio = contenedor.dataset.urlBaseNegocio;
-    const urlApiCatalogo = contenedor.dataset.urlApiCatalogo;
-    const urlUploads = contenedor.dataset.urlUploads;
-
-    // Guardar catalogo en cache local para modo offline
-    fetch(urlApiCatalogo)
-        .then(r => r.json())
-        .then(data => {
-            if (data.exito) {
-                localStorage.setItem('catalogo_' + negocioSlug, JSON.stringify(data));
-                localStorage.setItem('catalogo_' + negocioSlug + '_fecha', Date.now());
-            }
-        })
-        .catch(() => {});
-
-    // Cargar mas productos via AJAX
-    const btn = document.getElementById('cargar-mas');
-    if (btn) {
-        btn.addEventListener('click', () => {
-            const pagina = btn.dataset.pagina;
-            btn.textContent = 'Cargando...';
-            btn.disabled = true;
-
-            fetch(urlApiCatalogo + '?page=' + pagina)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.exito && data.productos.length > 0) {
-                        data.productos.forEach(p => {
-                            const precioHtml = p.precio_texto
-                                ? `<div class="flex" style="margin-top:.4rem;align-items:baseline">
-                                     <span class="product-price">${p.precio_texto}</span>
-                                     ${p.precio_anterior_texto ? `<span class="product-price-old">${p.precio_anterior_texto}</span>` : ''}
-                                   </div>`
-                                : '';
-
-                            const card = document.createElement('a');
-                            card.className = 'card product-card';
-                            card.style.cssText = 'text-decoration:none;color:inherit;overflow:hidden';
-                            card.href = urlBaseNegocio + '/producto/' + p.slug;
-
-                            const imgHtml = p.imagen_principal
-                                ? `<img src="${urlUploads}${p.imagen_principal}" alt="${p.nombre}" class="product-img" loading="lazy">`
-                                : `<div class="product-img flex" style="justify-content:center;align-items:center;background:var(--color-bg);font-size:2.5rem">📦</div>`;
-
-                            card.innerHTML = imgHtml + `<div class="product-info">
-                                <h3 class="product-name truncate">${p.nombre}</h3>
-                                ${p.descripcion_corta ? `<p class="text-sm truncate">${p.descripcion_corta}</p>` : ''}
-                                ${precioHtml}
-                            </div>`;
-                            contenedor.appendChild(card);
-                        });
-                        btn.dataset.pagina = parseInt(pagina, 10) + 1;
-                        btn.textContent = 'Cargar mas productos';
-                        btn.disabled = false;
-                    } else {
-                        btn.style.display = 'none';
-                    }
-                })
-                .catch(() => { btn.textContent = 'Error al cargar'; btn.disabled = false; });
+    function openDb() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(dbName, 1);
+            req.onupgradeneeded = () => {
+                if (!req.result.objectStoreNames.contains(queueStore)) {
+                    const store = req.result.createObjectStore(queueStore, { keyPath: 'client_uuid' });
+                    store.createIndex('status', 'status', { unique: false });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
         });
     }
+    async function allQueued() {
+        const db = await openDb();
+        return new Promise((resolve, reject) => {
+            const req = db.transaction(queueStore, 'readonly').objectStore(queueStore).getAll();
+            req.onsuccess = () => { db.close(); resolve(req.result || []); };
+            req.onerror = () => { db.close(); reject(req.error); };
+        });
+    }
+    async function saveQueued(order) {
+        const db = await openDb();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(queueStore, 'readwrite');
+            tx.objectStore(queueStore).put(order);
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+        });
+    }
+    async function updateQueued(order) { return saveQueued(order); }
+    async function deleteQueued(id) {
+        const db = await openDb();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(queueStore, 'readwrite');
+            tx.objectStore(queueStore).delete(id);
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+        });
+    }
+    function setStatus(message) {
+        const el = document.getElementById('pedido-estado');
+        if (el) el.textContent = message;
+    }
+    function getCatalog() {
+        try { return JSON.parse(localStorage.getItem('catalogo_' + slug) || 'null'); }
+        catch (_) { return null; }
+    }
+    function getProduct(id) {
+        const data = catalog || getCatalog();
+        return data && (data.productos || []).find(p => String(p.id) === String(id));
+    }
+    function persistCart() {
+        try { localStorage.setItem(storeKey, JSON.stringify(cart)); } catch (_) {}
+        renderCart();
+    }
+    function addProduct(product) {
+        if (!product || !product.id) return;
+        cart[String(product.id)] = (cart[String(product.id)] || 0) + 1;
+        persistCart();
+        setStatus('Añadido: ' + String(product.nombre || 'producto'));
+    }
+    function renderCart() {
+        const entries = Object.entries(cart);
+        const count = entries.reduce((n, pair) => n + pair[1], 0);
+        document.getElementById('pedido-toggle').textContent = 'Ver pedido (' + count + ')';
+        document.getElementById('pedido-resumen').textContent = count ? count + ' unidad(es) seleccionada(s)' : 'Aún no has añadido productos';
+        const lineas = document.getElementById('pedido-lineas');
+        lineas.replaceChildren();
+        entries.forEach(([id, qty]) => {
+            const p = getProduct(id);
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:.5rem;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid #ddd';
+            const name = document.createElement('span');
+            name.textContent = (p ? p.nombre : 'Producto ' + id) + ' × ' + qty + (p && p.precio_texto ? ' · ' + p.precio_texto : '');
+            const remove = document.createElement('button');
+            remove.type = 'button'; remove.className = 'btn btn-secondary'; remove.textContent = '−';
+            remove.setAttribute('aria-label', 'Quitar una unidad');
+            remove.addEventListener('click', () => { if (cart[id] > 1) cart[id]--; else delete cart[id]; persistCart(); });
+            const plus = document.createElement('button');
+            plus.type = 'button'; plus.className = 'btn btn-secondary'; plus.textContent = '+';
+            plus.setAttribute('aria-label', 'Añadir una unidad');
+            plus.addEventListener('click', () => { cart[id]++; persistCart(); });
+            const controls = document.createElement('span');
+            controls.append(remove, plus);
+            row.append(name, controls); lineas.appendChild(row);
+        });
+    }
+    async function renderQueue() {
+        const list = document.getElementById('pedido-pendientes');
+        list.replaceChildren();
+        try {
+            const queued = await allQueued();
+            queued.filter(o => o.slug === slug).forEach(o => {
+                const li = document.createElement('li');
+                li.style.cssText = 'margin:.5rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap';
+                const label = document.createElement('span');
+                label.textContent = (o.status === 'received' ? 'Recibido por el servidor' : o.status === 'error' ? 'Rechazado: ' + (o.last_error || 'revisar datos') : 'Pendiente de envío') + ' · ' + o.client_uuid;
+                li.appendChild(label);
+                if (o.status === 'pending') {
+                    const retry = document.createElement('button');
+                    retry.type = 'button'; retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
+                    retry.addEventListener('click', syncQueue);
+                    li.appendChild(retry);
+                }
+                if (o.status === 'error') {
+                    const remove = document.createElement('button');
+                    remove.type = 'button'; remove.className = 'btn btn-secondary'; remove.textContent = 'Eliminar para corregir';
+                    remove.addEventListener('click', async () => {
+                        await deleteQueued(o.client_uuid);
+                        setStatus('Pedido rechazado eliminado de la cola. Revisa los productos y crea uno nuevo.');
+                        renderQueue();
+                    });
+                    li.appendChild(remove);
+                }
+                list.appendChild(li);
+            });
+        } catch (_) {
+            const li = document.createElement('li');
+            li.textContent = 'El almacenamiento offline no está disponible en este navegador.';
+            list.appendChild(li);
+        }
+    }
+    async function syncQueue() {
+        if (!navigator.onLine) { setStatus('Sin conexión. El pedido queda guardado en este dispositivo.'); return; }
+        let orders;
+        try { orders = (await allQueued()).filter(o => o.slug === slug && o.status === 'pending'); }
+        catch (_) { setStatus('No se pudo abrir la cola local de pedidos.'); return; }
+        for (const order of orders) {
+            try {
+                const res = await fetch(order.endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(order.payload)
+                });
+                const result = await res.json();
+                if (res.ok && result.exito) {
+                    order.status = 'received';
+                    order.server_result = result.datos || {};
+                    order.last_error = '';
+                    await updateQueued(order);
+                    setStatus('Pedido recibido por el servidor. Estado: pendiente de confirmación del negocio.');
+                } else if (res.status >= 500 || res.status === 429) {
+                    order.status = 'pending';
+                    order.last_error = result.mensaje || 'Error temporal';
+                    await updateQueued(order);
+                    setStatus('No se pudo enviar ahora. Se reintentará cuando vuelva la conexión.');
+                } else {
+                    order.status = 'error';
+                    order.last_error = result.mensaje || 'Pedido rechazado';
+                    await updateQueued(order);
+                    setStatus('El servidor rechazó un pedido: ' + order.last_error + '. Corrige el pedido antes de crear otro.');
+                }
+            } catch (_) {
+                order.status = 'pending';
+                order.last_error = 'Sin conexión o respuesta del servidor';
+                await updateQueued(order);
+                setStatus('Sin conexión o respuesta. El pedido permanece guardado para reintentar.');
+                break;
+            }
+        }
+        await renderQueue();
+    }
+    function uuid() {
+        if (crypto && crypto.randomUUID) return crypto.randomUUID();
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+        });
+    }
+
+    try { cart = JSON.parse(localStorage.getItem(storeKey) || '{}') || {}; } catch (_) { cart = {}; }
+    catalog = getCatalog();
+    function renderAddButtons() {
+        if (!catalog || !Array.isArray(catalog.productos)) return;
+        document.querySelectorAll('#catalogo-productos .product-card').forEach(card => {
+            const href = card.getAttribute('href') || '';
+            const product = catalog.productos.find(p => href.endsWith('/producto/' + encodeURIComponent(p.slug || '')));
+            if (product) {
+                const info = card.querySelector('.product-info');
+                if (info && !info.querySelector('[data-add-product]')) {
+                    const button = document.createElement('button');
+                    button.type = 'button'; button.className = 'btn btn-primary';
+                    button.textContent = 'Añadir al pedido'; button.dataset.addProduct = '1';
+                    button.style.marginTop = '.5rem';
+                    button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); addProduct(product); });
+                    info.appendChild(button);
+                }
+            }
+        });
+    }
+    renderAddButtons();
+    fetch(grid.dataset.urlApiCatalogo).then(r => r.json()).then(data => {
+        if (data.exito && Array.isArray(data.productos)) {
+            catalog = data;
+            localStorage.setItem('catalogo_' + slug, JSON.stringify(data));
+            localStorage.setItem('catalogo_' + slug + '_fecha', String(Date.now()));
+            if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'CACHE_CATALOG', url: grid.dataset.urlApiCatalogo, data });
+            }
+            renderAddButtons();
+            renderCart();
+        } else {
+            // Una respuesta offline incompleta no debe reemplazar el catálogo local válido.
+            catalog = getCatalog();
+            renderAddButtons();
+            renderCart();
+            setStatus(catalog ? 'Sin conexión: catálogo guardado disponible; comprueba los datos antes de enviar.' : (data.mensaje || 'Sin conexión y sin catálogo guardado.'));
+        }
+    }).catch(() => {
+        catalog = getCatalog();
+        renderAddButtons();
+        renderCart();
+        setStatus(catalog ? 'Sin conexión: catálogo guardado disponible; comprueba los datos antes de enviar.' : 'Sin conexión y sin catálogo guardado.');
+    });
+
+    document.getElementById('pedido-toggle').addEventListener('click', () => {
+        const panel = document.getElementById('pedido-contenido');
+        panel.hidden = !panel.hidden;
+        renderCart();
+        renderQueue();
+    });
+    document.getElementById('pedido-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        const entries = Object.entries(cart);
+        if (!entries.length) { setStatus('Añade al menos un producto.'); return; }
+        const form = new FormData(event.currentTarget);
+        const payload = {
+            client_uuid: uuid(),
+            cliente_nombre: String(form.get('cliente_nombre') || '').trim(),
+            cliente_telefono: String(form.get('cliente_telefono') || '').trim(),
+            direccion_entrega: String(form.get('direccion_entrega') || '').trim(),
+            notas: String(form.get('notas') || '').trim(),
+            items: entries.map(([producto_id, cantidad]) => ({ producto_id: Number(producto_id), cantidad }))
+        };
+        const order = { client_uuid: payload.client_uuid, slug, endpoint: apiUrl, payload, status: 'pending', created_at: new Date().toISOString() };
+        try {
+            await saveQueued(order);
+            cart = {};
+            persistCart();
+            setStatus('Pedido guardado localmente. Intentando enviarlo…');
+            await renderQueue();
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registration = await navigator.serviceWorker.ready;
+                    if (registration.sync) await registration.sync.register('sync-catalogo');
+                } catch (_) { /* El reintento por evento online sigue disponible. */ }
+            }
+            await syncQueue();
+        } catch (_) {
+            setStatus('No se pudo guardar el pedido localmente. No cierres esta página; copia los datos o inténtalo de nuevo.');
+        }
+    });
+    window.addEventListener('online', syncQueue);
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', event => {
+            if (event.data && event.data.type === 'SYNC_QUEUE_UPDATED') {
+                setStatus('La cola de pedidos se ha sincronizado en segundo plano.');
+                renderQueue();
+            }
+        });
+    }
+    renderCart();
+    renderQueue();
+    syncQueue();
 })();
 </script>
 [[end]]

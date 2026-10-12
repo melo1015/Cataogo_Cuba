@@ -11,10 +11,9 @@ from datetime import datetime, timedelta
 
 from PIL import Image, ImageOps
 
-from py4web import Session, response
+from py4web import DAL, Field, Session, response
 from py4web.utils.auth import Auth
 from py4web.utils.form import FormStyleBulma
-from pydal import DAL, Field
 from pydal.tools.tags import Tags
 
 from . import settings
@@ -35,15 +34,29 @@ db = DAL(
 # SESION
 # ============================================================
 
-session = Session(secret=settings.SESSION_SECRET_KEY)
+session = Session(
+    secret=settings.SESSION_SECRET_KEY,
+    expiration=settings.SESSION_EXPIRATION,
+    same_site=settings.SESSION_SAMESITE,
+)
 
 # ============================================================
 # AUTENTICACION
 # ============================================================
 
-auth = Auth(session, db)
+auth = Auth(
+    session,
+    db,
+    extra_fields=[
+        Field("fecha_registro", "datetime", default=None),
+        Field("telefono", "string", length=20, default=""),
+    ],
+)
 
 auth.param.registration_requires_confirmation = settings.AUTH_REGISTRATION_REQUIRES_CONFIRMATION
+
+# Registra las rutas oficiales de autenticación de py4web (/auth/login, /auth/register, etc.).
+auth.enable()
 
 # ============================================================
 # AUTORIZACION MEDIANTE TAGS (mecanismo oficial de py4web)
@@ -128,19 +141,33 @@ def es_visitante():
 def optimizar_imagen(archivo, max_size=settings.IMAGE_MEDIUM_SIZE, quality=settings.IMAGE_QUALITY):
     """
     Comprime y optimiza una imagen para conexiones lentas.
+    Rechaza archivos demasiado grandes y limita la descompresion de imagenes.
     Retorna un BytesIO con la imagen optimizada, o None en caso de error.
     """
     try:
-        img = Image.open(archivo)
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        img = ImageOps.exif_transpose(img)
-        img.thumbnail(max_size, Image.LANCZOS)
+        # No confiar en el nombre ni en el Content-Type enviado por el cliente.
+        if hasattr(archivo, "seek") and hasattr(archivo, "tell"):
+            posicion = archivo.tell()
+            archivo.seek(0, os.SEEK_END)
+            bytes_archivo = archivo.tell()
+            archivo.seek(posicion)
+            if bytes_archivo > settings.MAX_IMAGE_SIZE:
+                return None
 
-        output = io.BytesIO()
-        img.save(output, format="JPEG", quality=quality, optimize=True)
-        output.seek(0)
-        return output
+        # Evita imagenes con dimensiones desproporcionadas (decompression bombs).
+        with Image.open(archivo) as original:
+            if getattr(original, "width", 0) * getattr(original, "height", 0) > 20_000_000:
+                return None
+            img = ImageOps.exif_transpose(original)
+            img.load()
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.thumbnail(max_size, Image.LANCZOS)
+
+            output = io.BytesIO()
+            img.save(output, format="JPEG", quality=quality, optimize=True)
+            output.seek(0)
+            return output
     except Exception as e:
         print("Error optimizando imagen: %s" % e)
         return None

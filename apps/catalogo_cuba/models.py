@@ -19,13 +19,7 @@ from . import settings
 # En py4web, Auth ya crea automaticamente sus tablas al instanciarse
 # en common.py. NO se debe llamar a auth.define_tables() (no existe en py4web).
 
-# Campos personalizados en auth_user que el resto del sistema espera
-if "fecha_registro" not in db.auth_user.fields:
-    db.auth_user.define_field("fecha_registro", "datetime", default=None)
-
-if "telefono" not in db.auth_user.fields:
-    db.auth_user.define_field("telefono", "string", length=20, default="")
-
+# Los campos personalizados se declaran en Auth(extra_fields=...) en common.py.
 db.auth_user.fecha_registro.writable = False
 db.auth_user.fecha_registro.readable = True
 
@@ -209,6 +203,14 @@ db.define_table(
               'en_proceso': 'En proceso'
           })),
     Field("referencia", "string", length=100, default="", label="Referencia/Numero de transaccion"),
+    # Clave normalizada y unica: el indice de la base de datos evita duplicados
+    # incluso cuando dos solicitudes concurrentes superan la comprobacion previa.
+    Field("referencia_unica", "string", length=120, unique=True, default=None,
+          label="Clave interna de referencia"),
+    # Clave única para impedir dos pagos abiertos de una misma suscripción,
+    # incluso si dos peticiones concurrentes usan referencias diferentes.
+    Field("suscripcion_abierta_id", "integer", unique=True, default=None,
+          label="Suscripción con pago abierto"),
     Field("comprobante", "upload", uploadfolder=settings.UPLOAD_FOLDER, label="Comprobante de pago",
           requires=IS_EMPTY_OR(IS_IMAGE(maxsize=(2000, 2000)))),
     Field("fecha_solicitud", "datetime", default=None, label="Fecha de solicitud"),
@@ -284,17 +286,61 @@ db.define_table(
 )
 
 # ============================================================
+# PEDIDOS PUBLICOS (idempotentes para reintentos offline)
+# ============================================================
+
+db.define_table(
+    "pedido",
+    Field("client_uuid", "string", length=36, unique=True, notnull=True,
+          label="Identificador idempotente del cliente"),
+    Field("negocio_id", "reference negocio", notnull=True, label="Negocio"),
+    Field("cliente_nombre", "string", length=120, notnull=True, label="Nombre del cliente"),
+    Field("cliente_telefono", "string", length=40, notnull=True, label="Telefono del cliente"),
+    Field("direccion_entrega", "string", length=300, default="", label="Direccion de entrega"),
+    Field("notas", "text", default="", label="Notas del pedido"),
+    Field("estado", "string", length=30, default="pendiente_revision", notnull=True,
+          label="Estado del pedido"),
+    Field("moneda", "string", length=10, notnull=True, label="Moneda del pedido"),
+    Field("total", "decimal(12,2)", notnull=True, label="Total calculado por servidor"),
+    Field("fecha_creacion", "datetime", default=None, label="Fecha de creacion"),
+    format="Pedido %(id)s",
+)
+
+db.define_table(
+    "pedido_item",
+    Field("pedido_id", "reference pedido", notnull=True, label="Pedido"),
+    Field("producto_id", "reference producto", notnull=True, label="Producto"),
+    Field("nombre_producto", "string", length=200, notnull=True, label="Nombre al realizar pedido"),
+    Field("cantidad", "integer", notnull=True, label="Cantidad solicitada"),
+    Field("precio_unitario", "decimal(10,2)", notnull=True, label="Precio verificado"),
+    Field("subtotal", "decimal(12,2)", notnull=True, label="Subtotal calculado"),
+    format="%(nombre_producto)s x %(cantidad)s",
+)
+
+# ============================================================
 # HOOKS DE AUTH
 # ============================================================
 
-@auth.on_signup
-def _on_signup(user):
-    """Asigna rol 'visitante' y fecha_registro al nuevo usuario."""
+def _on_signup(form, user):
+    """Asigna rol 'visitante' y fecha_registro al usuario recién registrado."""
     try:
-        user.update_record(fecha_registro=datetime.utcnow())
-        asignar_rol(user["id"], "visitante")
+        # py4web invoca on_accept['register'] con (form, user); en el flujo
+        # estándar de registro, user puede ser None, así que resolvemos por email.
+        email = (form.vars.get("email") or "").strip().lower()
+        if not email:
+            return
+        registro = db(db.auth_user.email == email).select(db.auth_user.id).first()
+        if not registro:
+            return
+        db(db.auth_user.id == registro.id).update(fecha_registro=datetime.utcnow())
+        asignar_rol(registro.id, "visitante")
+        db.commit()
     except Exception as e:
-        print("Error en on_signup: %s" % e)
+        db.rollback()
+        print("Error en callback de registro: %s" % e)
+
+
+auth.on_accept["register"] = _on_signup
 
 
 # ============================================================

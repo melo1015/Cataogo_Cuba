@@ -1,0 +1,317 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "audit/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax-and-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/catalogo_cuba/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r apps/catalogo_cuba/requirements.txt
+      - name: Compile Python files
+        run: python -m compileall -q apps/catalogo_cuba
+      - name: Verify production settings fail closed
+        env:
+          PYTHONPATH: apps
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          base_env = os.environ.copy()
+          base_env.pop("CATALOGO_CUBA_SECRET", None)
+          base_env["CATALOGO_CUBA_ENV"] = "production"
+          base_env["CATALOGO_CUBA_DEBUG"] = "0"
+          missing_secret = subprocess.run(
+              [sys.executable, "-c", "import catalogo_cuba.settings"],
+              env=base_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+          )
+          if missing_secret.returncode == 0:
+              raise SystemExit("Production settings unexpectedly started without CATALOGO_CUBA_SECRET")
+
+          production_env = base_env.copy()
+          production_env["CATALOGO_CUBA_SECRET"] = "ci-only-not-a-real-secret"
+          production_env["CATALOGO_CUBA_DEBUG"] = "1"
+          check = (
+              "import catalogo_cuba.settings as s; "
+              "assert s.IS_PRODUCTION; "
+              "assert not s.DEBUG; "
+              "assert s.SESSION_EXPIRATION == 604800; "
+              "assert s.SESSION_SAMESITE == 'Lax'; "
+              "assert s.AUTH_PASSWORD_MIN_LENGTH >= 10"
+          )
+          subprocess.run([sys.executable, "-c", check], env=production_env, check=True)
+          print("Production configuration rejects missing secrets and forces secure session settings.")
+          PY
+      - name: Import application smoke test
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          PYTHONPATH: apps
+        run: python -c "import catalogo_cuba; print('CatalogoCuba import OK')"
+      - name: Check service worker JavaScript syntax
+        run: node --check apps/catalogo_cuba/static/sw.js
+      - name: Check public catalog template JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          template = Path("apps/catalogo_cuba/templates/catalogo_negocio.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script\s*>", template, flags=re.IGNORECASE | re.DOTALL)
+          if not scripts:
+              raise SystemExit("No inline script found in catalogo_negocio.html")
+          javascript = "\n".join(scripts)
+          if re.search(r"\.innerHTML\s*=", javascript):
+              raise SystemExit("Unsafe innerHTML assignment found in public catalog template")
+          Path("/tmp/catalogo_negocio_inline.js").write_text(javascript, encoding="utf-8")
+          PY
+          node --check /tmp/catalogo_negocio_inline.js
+      - name: Run application schema and database-flow tests
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_ci.db"
+          PYTHONPATH: apps
+        run: python -m unittest discover -s apps/catalogo_cuba/tests -v
+      - name: Test authenticated merchant CRUD over HTTP
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          CATALOGO_CUBA_SECRET: "ci-only-crud-http-secret"
+          CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_crud_http_ci.db"
+          PYTHONPATH: apps
+        run: python apps/catalogo_cuba/tests/crud_http_integration.py
+      - name: Smoke-test real HTTP routes and unauthenticated payment protection
+        env:
+          CATALOGO_CUBA_DEBUG: "1"
+          CATALOGO_CUBA_SECRET: "ci-only-secret-not-for-production"
+          CATALOGO_CUBA_DB_URI: "sqlite://catalogo_cuba_http_ci.db"
+          PYTHONPATH: apps
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = "http://127.0.0.1:8765"
+          server = subprocess.Popen(
+              [
+                  "py4web", "run", "--yes",
+                  "--host", "127.0.0.1", "--port", "8765",
+                  "--app_names", "catalogo_cuba", "--server", "wsgiref",
+                  "--quiet", "--watch", "off", "apps",
+              ],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              env=os.environ.copy(),
+          )
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          client = urllib.request.build_opener(NoRedirect)
+          try:
+              last_error = None
+              for _ in range(40):
+                  if server.poll() is not None:
+                      startup_output = server.stdout.read().decode("utf-8", errors="replace")
+                      raise RuntimeError(
+                          "py4web server exited before becoming ready. Startup output: %s"
+                          % startup_output[-6000:]
+                      )
+                  try:
+                      response = client.open(base + "/catalogo_cuba/catalogo_cuba", timeout=2)
+                      status = response.getcode()
+                      if status != 200:
+                          raise AssertionError("Public catalog route returned HTTP %s" % status)
+                      break
+                  except urllib.error.HTTPError as exc:
+                      if exc.code >= 500:
+                          body = exc.read().decode("utf-8", errors="replace")
+                          server.terminate()
+                          output, _ = server.communicate(timeout=10)
+                          raise RuntimeError(
+                              "Public catalog route returned HTTP %s. Response body: %s. "
+                              "Server output: %s" % (exc.code, body[-3000:], output[-10000:])
+                          )
+                      last_error = exc
+                      time.sleep(0.5)
+                  except (OSError, urllib.error.URLError) as exc:
+                      last_error = exc
+                      time.sleep(0.5)
+              else:
+                  server.terminate()
+                  output, _ = server.communicate(timeout=10)
+                  raise RuntimeError(
+                      "py4web did not become ready: %r. Server output: %s"
+                      % (last_error, output[-10000:])
+                  )
+
+              # La fixture Auth de py4web debe registrar y servir la pantalla de login.
+              try:
+                  login_response = client.open(base + "/catalogo_cuba/auth/login", timeout=5)
+                  login_status = login_response.getcode()
+                  login_body = login_response.read().decode("utf-8", errors="replace")
+              except urllib.error.HTTPError as exc:
+                  login_status = exc.code
+                  login_body = exc.read().decode("utf-8", errors="replace")
+              if login_status != 200:
+                  server.terminate()
+                  output, _ = server.communicate(timeout=10)
+                  raise RuntimeError(
+                      "py4web auth login page should return HTTP 200, got HTTP %s: %s. "
+                      "Server output: %s"
+                      % (login_status, login_body[-1000:], output[-12000:])
+                  )
+
+              protected_routes = [
+                  (
+                      "order acceptance",
+                      "/catalogo_cuba/catalogo_cuba/admin/pedidos/1/estado",
+                      b'{"estado":"aceptado"}',
+                      "application/json",
+                  ),
+                  (
+                      "payment validation",
+                      "/catalogo_cuba/catalogo_cuba/superadmin/pago/validar/1",
+                      b"estado=validado",
+                      "application/x-www-form-urlencoded",
+                  ),
+                  (
+                      "business approval",
+                      "/catalogo_cuba/catalogo_cuba/superadmin/negocio/aprobar/1",
+                      b"",
+                      "application/x-www-form-urlencoded",
+                  ),
+                  (
+                      "inventory update",
+                      "/catalogo_cuba/catalogo_cuba/api/inventario/actualizar",
+                      b'{"producto_id":1,"stock":99}',
+                      "application/json",
+                  ),
+                  (
+                      "subscription payment creation",
+                      "/catalogo_cuba/catalogo_cuba/admin/pago/realizar",
+                      b"metodo_pago=transfermovil&moneda=CUP&monto=1&referencia=ci-unauth",
+                      "application/x-www-form-urlencoded",
+                  ),
+              ]
+              blocked_statuses = []
+              for label, path, body, content_type in protected_routes:
+                  request = urllib.request.Request(
+                      base + path,
+                      data=body,
+                      headers={"Content-Type": content_type},
+                      method="POST",
+                  )
+                  try:
+                      protected_response = client.open(request, timeout=5)
+                      protected_status = protected_response.getcode()
+                  except urllib.error.HTTPError as exc:
+                      protected_status = exc.code
+                      if exc.code >= 500:
+                          response_body = exc.read().decode("utf-8", errors="replace")
+                          server.terminate()
+                          output, _ = server.communicate(timeout=10)
+                          raise RuntimeError(
+                              "%s route returned HTTP %s. Response body: %s. "
+                              "Server output: %s"
+                              % (label, exc.code, response_body[-3000:], output[-10000:])
+                          )
+                  if protected_status not in (302, 303, 401, 403):
+                      raise AssertionError(
+                          "Unauthenticated %s POST was not blocked (HTTP %s)"
+                          % (label, protected_status)
+                      )
+                  blocked_statuses.append("%s=%s" % (label, protected_status))
+              # El panel de comerciante debe exigir sesión y no servir el dashboard
+              # directamente a visitantes anónimos.
+              try:
+                  dashboard_response = client.open(base + "/catalogo_cuba/catalogo_cuba/admin", timeout=5)
+                  dashboard_status = dashboard_response.getcode()
+              except urllib.error.HTTPError as exc:
+                  dashboard_status = exc.code
+              if dashboard_status not in (302, 303, 401, 403):
+                  raise AssertionError(
+                      "Unauthenticated merchant dashboard should be protected, got HTTP %s"
+                      % dashboard_status
+                  )
+
+              # El endpoint rechaza cuerpos grandes antes de intentar parsear JSON.
+              oversized_order = urllib.request.Request(
+                  base + "/catalogo_cuba/catalogo_cuba/api/negocio/slug-no-importa/pedidos",
+                  data=b"x" * (64 * 1024 + 1),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  oversized_response = client.open(oversized_order, timeout=5)
+                  oversized_status = oversized_response.getcode()
+              except urllib.error.HTTPError as exc:
+                  oversized_status = exc.code
+              if oversized_status != 413:
+                  raise AssertionError(
+                      "Oversized public order body should return HTTP 413, got HTTP %s"
+                      % oversized_status
+                  )
+
+              # La ruta pública de pedidos debe responder con un error de validación
+              # controlado (400), no con un error interno, ante un UUID inválido.
+              invalid_order = urllib.request.Request(
+                  base + "/catalogo_cuba/catalogo_cuba/api/negocio/slug-no-importa/pedidos",
+                  data=b'{"client_uuid":"no-es-uuid"}',
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  invalid_order_response = client.open(invalid_order, timeout=5)
+                  invalid_order_status = invalid_order_response.getcode()
+                  invalid_order_body = invalid_order_response.read().decode("utf-8", errors="replace")
+              except urllib.error.HTTPError as exc:
+                  invalid_order_status = exc.code
+                  invalid_order_body = exc.read().decode("utf-8", errors="replace")
+              if invalid_order_status != 400:
+                  raise AssertionError(
+                      "Invalid public order payload should return HTTP 400, got HTTP %s: %s"
+                      % (invalid_order_status, invalid_order_body[-1000:])
+                  )
+
+              # El Service Worker debe ser accesible desde la ruta de la aplicación
+              # y autorizar el scope completo que incluye las páginas del catálogo.
+              sw_response = client.open(base + "/catalogo_cuba/catalogo_cuba/sw.js", timeout=5)
+              sw_body = sw_response.read().decode("utf-8", errors="replace")
+              if sw_response.getcode() != 200:
+                  raise AssertionError("Service Worker route should return HTTP 200")
+              if sw_response.headers.get("Service-Worker-Allowed") != "/catalogo_cuba/":
+                  raise AssertionError("Service Worker must authorize scope /catalogo_cuba/")
+              if "self.addEventListener('fetch'" not in sw_body:
+                  raise AssertionError("Service Worker response does not contain fetch handler")
+
+              print(
+                  "HTTP smoke test passed: public route HTTP 200; merchant dashboard protected (HTTP %s); "
+                  "invalid order payload HTTP 400; protected unauthenticated POSTs blocked: %s"
+                  % (dashboard_status, ", ".join(blocked_statuses))
+              )
+          finally:
+              server.terminate()
+              try:
+                  server.wait(timeout=10)
+              except subprocess.TimeoutExpired:
+                  server.kill()
+                  server.wait(timeout=5)
+          PY
