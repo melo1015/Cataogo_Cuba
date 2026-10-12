@@ -5,6 +5,7 @@ The test seeds two merchants, logs in through py4web's real HTTP API, and
 checks create/edit access plus cross-tenant isolation over HTTP.
 """
 import os
+import json
 import subprocess
 import sys
 import time
@@ -94,6 +95,18 @@ def seed():
     business_b = db.negocio.insert(
         nombre="Negocio HTTP B", slug="negocio-http-b", usuario_id=user_b,
         activo=True, aprobado=True, moneda_principal="CUP",
+    )
+    from datetime import date
+    today = date.today()
+    db.suscripcion.insert(
+        negocio_id=business_a, usuario_id=user_a,
+        fecha_inicio=today, fecha_fin=today + __import__("datetime").timedelta(days=30),
+        estado="activa",
+    )
+    db.suscripcion.insert(
+        negocio_id=business_b, usuario_id=user_b,
+        fecha_inicio=today, fecha_fin=today + __import__("datetime").timedelta(days=30),
+        estado="activa",
     )
     category_a = db.categoria.insert(
         nombre="Categoria A", slug="categoria-a", negocio_id=business_a, activa=True,
@@ -204,6 +217,50 @@ def main():
         email_b, _, _, category_b, product_b, _, _ = seeded["b"]
         client_a = login(email_a)
         client_b = login(email_b)
+
+        # La API pública debe ser idempotente al reintentar un pedido offline:
+        # mismo UUID = mismo pedido; mismo UUID en otro negocio = conflicto.
+        public_order_payload = {
+            "client_uuid": "22222222-2222-4222-8222-222222222222",
+            "cliente_nombre": "Cliente idempotencia",
+            "cliente_telefono": "5550102",
+            "direccion_entrega": "",
+            "notas": "Prueba de reintento",
+            "items": [{"producto_id": seeded["a"][4], "cantidad": 1}],
+        }
+        public_order_data = json.dumps(public_order_payload).encode()
+        order_headers = {"Content-Type": "application/json"}
+        status, body = request(
+            urllib.request.build_opener(),
+            APP_PREFIX + "/catalogo_cuba/api/negocio/negocio-http-a/pedidos",
+            data=public_order_data, headers=order_headers,
+        )
+        if status != 200:
+            raise AssertionError("First public order request failed: HTTP %s %s" % (status, body[-500:]))
+        first_order_response = json.loads(body)
+        first_order_id = first_order_response.get("datos", {}).get("pedido_id")
+        if not first_order_id or first_order_response.get("datos", {}).get("duplicado") is not False:
+            raise AssertionError("First order response did not report a newly created order: %s" % body[-500:])
+        status, body = request(
+            urllib.request.build_opener(),
+            APP_PREFIX + "/catalogo_cuba/api/negocio/negocio-http-a/pedidos",
+            data=public_order_data, headers=order_headers,
+        )
+        if status != 200:
+            raise AssertionError("Idempotent retry failed: HTTP %s %s" % (status, body[-500:]))
+        retry_response = json.loads(body)
+        if (retry_response.get("datos", {}).get("pedido_id") != first_order_id or
+                retry_response.get("datos", {}).get("duplicado") is not True):
+            raise AssertionError("Retry created a different order or was not marked duplicate: %s" % body[-500:])
+        if db(db.pedido.client_uuid == public_order_payload["client_uuid"]).count() != 1:
+            raise AssertionError("Idempotent retry created duplicate database rows")
+        status, body = request(
+            urllib.request.build_opener(),
+            APP_PREFIX + "/catalogo_cuba/api/negocio/negocio-http-b/pedidos",
+            data=public_order_data, headers=order_headers,
+        )
+        if status != 409:
+            raise AssertionError("UUID reuse by another business should return 409, got HTTP %s: %s" % (status, body[-500:]))
 
         # Cross-tenant mutation attempts must not modify inventory, orders or notifications.
         business_b_id = seeded["b"][2]
