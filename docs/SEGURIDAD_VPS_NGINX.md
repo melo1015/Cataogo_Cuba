@@ -39,9 +39,10 @@ Si se añade Cloudflare u otro proxy delante de Nginx, no reutilizar esta config
 ## 4. Límites de solicitudes y cuerpos
 
 - Las APIs usan una zona compartida de Nginx con límite inicial de 10 solicitudes/s por IP y ráfaga de 30.
+- Login, registro y recuperación de contraseña bajo `/catalogo_cuba/auth/` tienen un límite inicial de 5 solicitudes/minuto por IP, con ráfaga de 5.
 - La creación pública de pedidos usa un límite inicial de 2 solicitudes/s por IP, ráfaga de 6 y un cuerpo máximo de 64 KiB.
 - El resto de la aplicación permite cuerpos de hasta 3 MiB para que los uploads legítimos no queden bloqueados por el límite de pedidos; la aplicación mantiene su propio máximo de 2 MiB por imagen.
-- Nginx devuelve HTTP 429 al aplicar limitación. Ajustar las tasas según logs y carga real para no bloquear usuarios legítimos detrás de una misma IP compartida.
+- Nginx devuelve HTTP 429 al aplicar limitación. Ajustar las tasas según logs y carga real para no bloquear usuarios legítimos detrás de una misma IP compartida; en especial, los límites de autenticación pueden afectar a personas que comparten una IP móvil o NAT.
 - Estos límites se aplican en Nginx; no sustituyen cuotas de negocio, autorización, validación ni idempotencia en la aplicación.
 
 ## 5. Variables obligatorias de producción
