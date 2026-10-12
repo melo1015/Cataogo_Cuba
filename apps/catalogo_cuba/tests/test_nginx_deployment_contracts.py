@@ -57,7 +57,7 @@ class NginxDeploymentContractTests(unittest.TestCase):
         self.assertIn("CATALOGO_CUBA_TRUSTED_PROXY_IPS=127.0.0.1", self.docs)
         self.assertIn("no confiar en rangos amplios", self.docs.lower())
         self.assertIn("nginx -t", self.docs)
-        self.assertIn("No versionar secretos", self.docs)
+        self.assertIn("no versionar secretos", self.docs.lower())
 
 
 if __name__ == "__main__":
