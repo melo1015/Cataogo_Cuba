@@ -69,7 +69,23 @@ Generar un secreto criptográficamente aleatorio con un gestor de secretos o her
 - Respaldar base de datos y uploads; cifrar copias externas y probar restauraciones periódicamente.
 - Supervisar errores 4xx/5xx, reinicios, espacio en disco y uso de memoria. No registrar contraseñas, cookies, tokens ni cuerpos de pedidos.
 
-## 7. Verificación antes de abrir el servicio
+## 7. Migraciones de base de datos antes de actualizar producción
+
+La aplicación usa migraciones de pyDAL (DB_MIGRATE = True) y guarda los metadatos bajo apps/catalogo_cuba/databases. El repositorio no contiene una copia de la base de datos de producción ni un historial de migraciones SQL revisables; por tanto, CI demuestra que el esquema se crea y que las restricciones funcionan en una base aislada, pero no puede certificar por sí solo una actualización de datos existentes.
+
+Antes de desplegar una versión que añada campos o restricciones:
+
+1. Identificar el motor real y la URI efectiva de producción. No copiar la base de datos activa ni secretos al repositorio.
+2. Hacer backup consistente de la base de datos y de los uploads. Verificar la integridad del backup y, preferiblemente, ensayar su restauración en una instancia aislada.
+3. Ejecutar la versión candidata contra una copia aislada de la base de datos existente, con el mismo motor y versión que producción. Confirmar que pyDAL completa las migraciones y que los datos antiguos siguen legibles.
+4. Comprobar en particular los campos nuevos con restricciones UNIQUE/NOT NULL. Si una tabla existente tiene filas, añadir un campo obligatorio nuevo puede requerir una migración por etapas: añadir nullable, rellenar valores válidos, detectar/resolver duplicados, crear índice único y solo después exigir NOT NULL. No asumir que la migración automática de cualquier motor resolverá los datos existentes.
+5. Probar rollback/restauración. No considerar el rollback de código como rollback de esquema.
+6. En la ventana de mantenimiento, detener escrituras, tomar un backup final, desplegar y verificar tablas, índices, pedidos, pagos y autenticación. Conservar un plan de restauración.
+7. Revisar el estado de la migración antes de reabrir el tráfico. No eliminar archivos de metadatos de pyDAL para forzar una migración.
+
+Las pruebas de esquema en CI comprueban ahora la presencia de la clave idempotente única de pedido y la clave nullable/única para pagos abiertos. Estas pruebas son de esquema fresco; la validación de upgrade debe hacerse sobre una copia de la base existente.
+
+## 8. Verificación antes de abrir el servicio
 
 - [ ] `nginx -t` pasa y el certificado HTTPS es válido.
 - [ ] HTTP redirige a HTTPS.
