@@ -3,23 +3,37 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.egg-info/
 .venv/
 venv/
+env/
+
+# Environment and secrets
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 
-# py4web / database / uploads
+# Local databases and migrations generated during development
+*.db
 *.sqlite
 *.sqlite3
 *.sqlite-journal
 storage.db
 apps/*/databases/
+apps/**/databases/
+apps/**/storage.db
+
+# User uploads and generated media
 apps/*/uploads/*
 !apps/*/uploads/.gitkeep
+apps/catalogo_cuba/uploads/
+uploads/
 
-# Local tooling
+# Test / tooling
 .pytest_cache/
 .coverage
 htmlcov/
 .DS_Store
+Thumbs.db
