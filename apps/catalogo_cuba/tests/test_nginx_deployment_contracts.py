@@ -21,9 +21,12 @@ class NginxDeploymentContractTests(unittest.TestCase):
     def test_rate_limit_zones_are_defined_and_used(self):
         self.assertIn("zone=catalogo_api:10m rate=10r/s", self.limits)
         self.assertIn("zone=catalogo_orders:10m rate=2r/s", self.limits)
+        self.assertIn("zone=catalogo_auth:10m rate=5r/m", self.limits)
         self.assertIn("zone=catalogo_per_ip:10m", self.limits)
         self.assertIn("limit_req zone=catalogo_api burst=30 nodelay", self.site)
         self.assertIn("limit_req zone=catalogo_orders burst=6 nodelay", self.site)
+        self.assertIn("location ^~ /catalogo_cuba/auth/", self.site)
+        self.assertIn("limit_req zone=catalogo_auth burst=5 nodelay", self.site)
         self.assertIn("limit_conn catalogo_per_ip 20", self.site)
         self.assertIn("limit_req_status 429", self.site)
 
@@ -57,6 +60,7 @@ class NginxDeploymentContractTests(unittest.TestCase):
         self.assertIn("CATALOGO_CUBA_TRUSTED_PROXY_IPS=127.0.0.1", self.docs)
         self.assertIn("no confiar en rangos amplios", self.docs.lower())
         self.assertIn("nginx -t", self.docs)
+        self.assertIn("login, registro y recuperación de contraseña", self.docs)
         self.assertIn("no versionar secretos", self.docs.lower())
 
 
